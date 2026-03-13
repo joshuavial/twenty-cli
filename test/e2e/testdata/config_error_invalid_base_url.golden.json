@@ -1,0 +1,9 @@
+{
+  "command": "cli",
+  "error": {
+    "code": "cli.parse",
+    "kind": "usage",
+    "message": "base URL must be a valid absolute URL"
+  },
+  "ok": false
+}

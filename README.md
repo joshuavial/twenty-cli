@@ -158,3 +158,27 @@ For repeatable browser automation, save the Browserplex storage state after logi
 go test ./...
 go vet ./...
 ```
+
+## Integration Test Harness
+
+The end-to-end CLI harness lives under `./test/e2e`. These tests build the real
+`twenty` binary, run it in a temp workspace with explicit env/config, and compare
+JSON stdout against golden files in `./test/e2e/testdata`.
+
+Run the full suite:
+
+```bash
+go test ./...
+```
+
+Run only the integration harness:
+
+```bash
+go test ./test/e2e
+```
+
+Update golden snapshots intentionally:
+
+```bash
+UPDATE_GOLDEN=1 go test ./test/e2e
+```

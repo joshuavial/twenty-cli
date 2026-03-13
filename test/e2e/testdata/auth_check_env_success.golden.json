@@ -1,0 +1,8 @@
+{
+  "command": "auth.check",
+  "data": {
+    "endpoint": "/rest/metadata",
+    "status_code": 200
+  },
+  "ok": true
+}

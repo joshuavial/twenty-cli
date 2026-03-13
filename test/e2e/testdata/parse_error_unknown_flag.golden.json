@@ -1,0 +1,9 @@
+{
+  "command": "cli",
+  "error": {
+    "code": "cli.parse",
+    "kind": "usage",
+    "message": "flag provided but not defined: -wat"
+  },
+  "ok": false
+}

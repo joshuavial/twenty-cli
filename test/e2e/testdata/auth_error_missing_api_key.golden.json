@@ -1,0 +1,9 @@
+{
+  "command": "auth.check",
+  "error": {
+    "code": "auth.missing_api_key",
+    "kind": "auth",
+    "message": "missing API key; set TWENTY_API_KEY or pass --api-key"
+  },
+  "ok": false
+}
