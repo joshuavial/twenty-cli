@@ -30,7 +30,7 @@ Supported flags:
 - `--base-url`
 - `--format json|text`
 
-Settings files live inside a `.twenty` config directory and are JSON. Example:
+Settings files are JSON. Example:
 
 ```json
 {
@@ -40,6 +40,70 @@ Settings files live inside a `.twenty` config directory and are JSON. Example:
 ```
 
 The current working directory config overrides the home directory config.
+
+## Local Twenty dev server
+
+This repo includes a local Twenty CRM checkout as the `twenty/` git submodule. The root `./dev` wrapper runs Docker Compose from `twenty/packages/twenty-docker`.
+
+```bash
+./dev up -d
+./dev down
+./dev logs -f server
+./dev ps
+./dev reset
+```
+
+The local app is exposed on:
+
+- `http://localhost:3000`
+- `http://localhost:3000/graphql`
+
+Postgres and Redis remain internal to the Docker network.
+
+## Reset For Integration Tests
+
+`./dev reset` does all of the setup needed for local integration testing:
+
+1. Wipes the Docker volumes
+2. Starts a fresh Twenty stack
+3. Seeds the upstream demo workspace
+4. Generates a fresh API key
+5. Writes CLI-compatible local settings into `./.twenty/settings`
+
+It also writes a few convenience artifacts:
+
+- `./.twenty/api-key`
+- `./.twenty/dev-server.env`
+
+The generated CLI settings file looks like this:
+
+```json
+{
+  "api_key": "<generated-api-key>",
+  "base_url": "http://localhost:3000"
+}
+```
+
+Because the Go CLI checks `./.twenty/settings` before `~/.twenty/settings`, running commands from this repo will automatically target the local dev server after `./dev reset`.
+
+## Demo Account
+
+The reset flow seeds the `Apple` demo workspace with:
+
+- Email: `tim@apple.dev`
+- Password: `tim@apple.dev`
+
+## Browserplex Flow
+
+`./dev reset` is the fastest path because it generates the API key directly inside the server container. If you want to validate the browser path too, use Browserplex against `http://localhost:3000`, log in with the demo account above, then go to `Settings` -> `API & Webhooks` and create a key there.
+
+For repeatable browser automation, save the Browserplex storage state after login so later runs can skip the sign-in form.
+
+## Notes
+
+- Twenty's upstream demo seeder is not cleanly idempotent. Re-running it against an already-seeded workspace can produce duplicate-key errors.
+- `./dev reset` avoids seed conflicts by wiping Docker volumes first, then seeding into a clean database.
+- API key generation uses Twenty's built-in `workspace:generate-api-key` command with `NODE_ENV=development` forced for that one-shot command run.
 
 ## Verification
 

@@ -1,0 +1,3 @@
+[submodule "twenty"]
+	path = twenty
+	url = https://github.com/twentyhq/twenty.git

@@ -1,0 +1,150 @@
+#!/usr/bin/env bash
+
+set -euo pipefail
+
+ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+STACK_DIR="$ROOT_DIR/twenty/packages/twenty-docker"
+TWENTY_DIR="$ROOT_DIR/.twenty"
+BASE_URL="http://localhost:3000"
+GRAPHQL_URL="$BASE_URL/graphql"
+DEMO_EMAIL="tim@apple.dev"
+DEMO_PASSWORD="tim@apple.dev"
+DEMO_WORKSPACE_NAME="Apple"
+API_KEY_NAME="Relay Dev CLI"
+
+if [[ ! -d "$STACK_DIR" ]]; then
+  echo "Missing stack directory: $STACK_DIR" >&2
+  exit 1
+fi
+
+compose() {
+  docker compose "$@"
+}
+
+wait_for_server() {
+  local attempts=90
+
+  while (( attempts > 0 )); do
+    if curl -fsS "$BASE_URL/healthz" >/dev/null 2>&1; then
+      return 0
+    fi
+
+    sleep 2
+    attempts=$((attempts - 1))
+  done
+
+  echo "Timed out waiting for $BASE_URL/healthz" >&2
+  return 1
+}
+
+seed_demo() {
+  compose exec -T server yarn command:prod -- workspace:seed:dev
+}
+
+get_workspace_id() {
+  local workspace_id
+
+  workspace_id="$(compose exec -T db psql -U postgres -d default -t -A \
+    -c "select id from core.workspace where \"displayName\" = '$DEMO_WORKSPACE_NAME' limit 1;")"
+  workspace_id="${workspace_id//$'\r'/}"
+  workspace_id="${workspace_id//$'\n'/}"
+
+  if [[ -z "$workspace_id" ]]; then
+    echo "Failed to find workspace ID for $DEMO_WORKSPACE_NAME" >&2
+    return 1
+  fi
+
+  printf '%s\n' "$workspace_id"
+}
+
+generate_api_key() {
+  local workspace_id="$1"
+  local output
+  local token
+
+  output="$(
+    compose exec -T server env NODE_ENV=development \
+      node dist/command/command workspace:generate-api-key \
+      -w "$workspace_id" \
+      -n "$API_KEY_NAME" 2>&1
+  )"
+
+  token="$(printf '%s\n' "$output" | sed -n 's/.*TOKEN:\([^[:space:]]*\).*/\1/p' | tail -n1)"
+
+  if [[ -z "$token" ]]; then
+    printf '%s\n' "$output" >&2
+    echo "Failed to generate API key token" >&2
+    return 1
+  fi
+
+  printf '%s\n' "$token"
+}
+
+write_local_config() {
+  local workspace_id="$1"
+  local api_key="$2"
+
+  mkdir -p "$TWENTY_DIR"
+  umask 077
+
+  printf '%s\n' "$api_key" > "$TWENTY_DIR/api-key"
+  cat > "$TWENTY_DIR/settings" <<EOF
+{
+  "api_key": "$api_key",
+  "base_url": "$BASE_URL"
+}
+EOF
+  cat > "$TWENTY_DIR/dev-server.env" <<EOF
+TWENTY_API_KEY=$api_key
+TWENTY_BASE_URL=$BASE_URL
+TWENTY_API_URL=$GRAPHQL_URL
+TWENTY_WORKSPACE_ID=$workspace_id
+TWENTY_LOGIN_EMAIL=$DEMO_EMAIL
+TWENTY_LOGIN_PASSWORD=$DEMO_PASSWORD
+EOF
+}
+
+reset_stack() {
+  local workspace_id
+  local api_key
+
+  compose down -v --remove-orphans
+  compose up -d
+  wait_for_server
+  seed_demo
+  workspace_id="$(get_workspace_id)"
+  api_key="$(generate_api_key "$workspace_id")"
+  write_local_config "$workspace_id" "$api_key"
+
+  printf 'Wrote local Twenty settings to %s\n' "$TWENTY_DIR/settings"
+}
+
+if [[ $# -eq 0 ]]; then
+  cat >&2 <<'EOF'
+Usage: ./dev <command>
+
+Examples:
+  ./dev up -d
+  ./dev down
+  ./dev logs -f server
+  ./dev ps
+  ./dev reset
+EOF
+  exit 1
+fi
+
+cd "$STACK_DIR"
+
+if [[ "$1" == "reset" ]]; then
+  shift
+
+  if [[ $# -ne 0 ]]; then
+    echo "./dev reset does not accept extra arguments" >&2
+    exit 1
+  fi
+
+  reset_stack
+  exit 0
+fi
+
+compose "$@"
