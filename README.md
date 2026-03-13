@@ -9,6 +9,53 @@ twenty auth check
 twenty version
 ```
 
+## Output Contract
+
+JSON is the primary machine-readable mode. Every command emits a stable envelope on `stdout`:
+
+```json
+{
+  "ok": true,
+  "command": "auth.check",
+  "data": {
+    "status_code": 200,
+    "endpoint": "/rest/metadata"
+  }
+}
+```
+
+Failures keep the same top-level shape and normalize error classification:
+
+```json
+{
+  "ok": false,
+  "command": "auth.check",
+  "error": {
+    "kind": "auth",
+    "code": "auth.invalid_credentials",
+    "message": "api request failed with status 401",
+    "details": {
+      "status_code": 401
+    }
+  }
+}
+```
+
+Optional metadata lives under `meta` and is omitted when empty. The contract currently reserves:
+
+- `meta.page_info` for paging state (`limit`, `returned`, `total`, `next_cursor`, `prev_cursor`)
+- `meta.warnings` for non-fatal machine-readable warnings
+
+Exit codes are stable across commands:
+
+- `0` success
+- `2` usage or parse failures
+- `3` auth or credential failures
+- `4` API failures after a valid request
+- `10` internal/runtime failures
+
+`--format text` remains available for humans, but it is just a presentation layer over the same underlying result/error model.
+
 ## Config
 
 The CLI looks for credentials and base URL in this order:

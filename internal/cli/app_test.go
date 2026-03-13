@@ -3,12 +3,13 @@ package cli
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
-	"strings"
 	"testing"
 
 	"github.com/jv/twenty-crm-cli/internal/client"
 	"github.com/jv/twenty-crm-cli/internal/config"
+	"github.com/jv/twenty-crm-cli/internal/output"
 )
 
 type authCheckerStub struct {
@@ -18,6 +19,17 @@ type authCheckerStub struct {
 
 func (s authCheckerStub) AuthCheck(context.Context) (client.AuthCheckResult, error) {
 	return s.result, s.err
+}
+
+func decodeEnvelope(t *testing.T, data string) output.Envelope {
+	t.Helper()
+
+	var envelope output.Envelope
+	if err := json.Unmarshal([]byte(data), &envelope); err != nil {
+		t.Fatalf("json.Unmarshal() error = %v", err)
+	}
+
+	return envelope
 }
 
 func TestAuthCheckJSONSuccess(t *testing.T) {
@@ -39,8 +51,12 @@ func TestAuthCheckJSONSuccess(t *testing.T) {
 		t.Fatalf("Run() code = %d, want 0", code)
 	}
 
-	if !strings.Contains(stdout.String(), `"command": "auth.check"`) {
-		t.Fatalf("stdout = %s", stdout.String())
+	envelope := decodeEnvelope(t, stdout.String())
+	if !envelope.OK {
+		t.Fatalf("OK = false, want true")
+	}
+	if envelope.Command != "auth.check" {
+		t.Fatalf("Command = %q, want %q", envelope.Command, "auth.check")
 	}
 }
 
@@ -51,12 +67,16 @@ func TestAuthCheckMissingAPIKey(t *testing.T) {
 	app := New(&stdout, &stderr)
 
 	code := app.Run([]string{"auth", "check"})
-	if code != exitAuth {
-		t.Fatalf("Run() code = %d, want %d", code, exitAuth)
+	if code != int(output.ExitAuth) {
+		t.Fatalf("Run() code = %d, want %d", code, output.ExitAuth)
 	}
 
-	if !strings.Contains(stdout.String(), `"code": "auth.missing_api_key"`) {
+	envelope := decodeEnvelope(t, stdout.String())
+	if envelope.Error == nil || envelope.Error.Code != "auth.missing_api_key" {
 		t.Fatalf("stdout = %s", stdout.String())
+	}
+	if envelope.Error.Kind != output.ErrorKindAuth {
+		t.Fatalf("Error.Kind = %q, want %q", envelope.Error.Kind, output.ErrorKindAuth)
 	}
 }
 
@@ -67,12 +87,16 @@ func TestParseFailureReturnsJSONWhenRequested(t *testing.T) {
 	app := New(&stdout, &stderr)
 
 	code := app.Run([]string{"--format", "json", "--wat"})
-	if code != exitUsage {
-		t.Fatalf("Run() code = %d, want %d", code, exitUsage)
+	if code != int(output.ExitUsage) {
+		t.Fatalf("Run() code = %d, want %d", code, output.ExitUsage)
 	}
 
-	if !strings.Contains(stdout.String(), `"code": "cli.parse"`) {
+	envelope := decodeEnvelope(t, stdout.String())
+	if envelope.Error == nil || envelope.Error.Code != "cli.parse" {
 		t.Fatalf("stdout = %s", stdout.String())
+	}
+	if envelope.Command != "cli" {
+		t.Fatalf("Command = %q, want %q", envelope.Command, "cli")
 	}
 }
 
@@ -83,11 +107,12 @@ func TestConfigFailureReturnsJSONWhenRequested(t *testing.T) {
 	app := New(&stdout, &stderr)
 
 	code := app.Run([]string{"--format", "yaml", "version"})
-	if code != exitUsage {
-		t.Fatalf("Run() code = %d, want %d", code, exitUsage)
+	if code != int(output.ExitUsage) {
+		t.Fatalf("Run() code = %d, want %d", code, output.ExitUsage)
 	}
 
-	if !strings.Contains(stdout.String(), `"code": "cli.parse"`) {
+	envelope := decodeEnvelope(t, stdout.String())
+	if envelope.Error == nil || envelope.Error.Code != "cli.parse" {
 		t.Fatalf("stdout = %s", stdout.String())
 	}
 }
@@ -107,12 +132,16 @@ func TestAuthCheckForbiddenReturnsPermissionError(t *testing.T) {
 	}
 
 	code := app.Run([]string{"--api-key", "secret", "auth", "check"})
-	if code != exitAPI {
-		t.Fatalf("Run() code = %d, want %d", code, exitAPI)
+	if code != int(output.ExitAPI) {
+		t.Fatalf("Run() code = %d, want %d", code, output.ExitAPI)
 	}
 
-	if !strings.Contains(stdout.String(), `"code": "auth.insufficient_permissions"`) {
+	envelope := decodeEnvelope(t, stdout.String())
+	if envelope.Error == nil || envelope.Error.Code != "auth.insufficient_permissions" {
 		t.Fatalf("stdout = %s", stdout.String())
+	}
+	if envelope.Error.Kind != output.ErrorKindAPI {
+		t.Fatalf("Error.Kind = %q, want %q", envelope.Error.Kind, output.ErrorKindAPI)
 	}
 }
 
@@ -131,12 +160,16 @@ func TestAuthCheckUnauthorizedReturnsInvalidCredentials(t *testing.T) {
 	}
 
 	code := app.Run([]string{"--api-key", "secret", "auth", "check"})
-	if code != exitAuth {
-		t.Fatalf("Run() code = %d, want %d", code, exitAuth)
+	if code != int(output.ExitAuth) {
+		t.Fatalf("Run() code = %d, want %d", code, output.ExitAuth)
 	}
 
-	if !strings.Contains(stdout.String(), `"code": "auth.invalid_credentials"`) {
+	envelope := decodeEnvelope(t, stdout.String())
+	if envelope.Error == nil || envelope.Error.Code != "auth.invalid_credentials" {
 		t.Fatalf("stdout = %s", stdout.String())
+	}
+	if envelope.Error.Kind != output.ErrorKindAuth {
+		t.Fatalf("Error.Kind = %q, want %q", envelope.Error.Kind, output.ErrorKindAuth)
 	}
 }
 
@@ -152,11 +185,15 @@ func TestAuthCheckRequestFailureReturnsInternalError(t *testing.T) {
 	}
 
 	code := app.Run([]string{"--api-key", "secret", "auth", "check"})
-	if code != exitInternal {
-		t.Fatalf("Run() code = %d, want %d", code, exitInternal)
+	if code != int(output.ExitInternal) {
+		t.Fatalf("Run() code = %d, want %d", code, output.ExitInternal)
 	}
 
-	if !strings.Contains(stdout.String(), `"code": "auth.request_failed"`) {
+	envelope := decodeEnvelope(t, stdout.String())
+	if envelope.Error == nil || envelope.Error.Code != "auth.request_failed" {
 		t.Fatalf("stdout = %s", stdout.String())
+	}
+	if !envelope.Error.Retryable {
+		t.Fatalf("Retryable = false, want true")
 	}
 }

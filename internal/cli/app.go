@@ -13,14 +13,6 @@ import (
 	"github.com/jv/twenty-crm-cli/internal/output"
 )
 
-const (
-	exitOK       = 0
-	exitUsage    = 2
-	exitAuth     = 3
-	exitAPI      = 4
-	exitInternal = 10
-)
-
 type App struct {
 	stdout        io.Writer
 	stderr        io.Writer
@@ -46,7 +38,12 @@ func New(stdout, stderr io.Writer) *App {
 func (a *App) Run(args []string) int {
 	cfg, remaining, err := a.parseRoot(args)
 	if err != nil {
-		return a.writeError("cli.parse", err.Error(), nil, inferRequestedFormat(args), exitUsage)
+		return a.writeFailure(output.Failure{
+			Command: "cli",
+			Kind:    output.ErrorKindUsage,
+			Code:    "cli.parse",
+			Message: err.Error(),
+		}, inferRequestedFormat(args))
 	}
 
 	if len(remaining) == 0 {
@@ -57,9 +54,18 @@ func (a *App) Run(args []string) int {
 	case "auth":
 		return a.runAuth(cfg, remaining[1:])
 	case "version":
-		return a.writeSuccess("version", map[string]string{"version": "dev"}, cfg.Format)
+		return a.writeSuccess(output.Result{
+			Command: "version",
+			Data:    map[string]string{"version": "dev"},
+			Text:    "dev",
+		}, cfg.Format)
 	default:
-		return a.writeError("cli.unknown_command", fmt.Sprintf("unknown command: %s", remaining[0]), nil, cfg.Format, exitUsage)
+		return a.writeFailure(output.Failure{
+			Command: "cli",
+			Kind:    output.ErrorKindUsage,
+			Code:    "cli.unknown_command",
+			Message: fmt.Sprintf("unknown command: %s", remaining[0]),
+		}, cfg.Format)
 	}
 }
 
@@ -89,91 +95,109 @@ func (a *App) parseRoot(args []string) (config.Config, []string, error) {
 
 func (a *App) runAuth(cfg config.Config, args []string) int {
 	if len(args) == 0 {
-		return a.writeError("auth.usage", "expected subcommand: check", nil, cfg.Format, exitUsage)
+		return a.writeFailure(output.Failure{
+			Command: "auth",
+			Kind:    output.ErrorKindUsage,
+			Code:    "auth.usage",
+			Message: "expected subcommand: check",
+		}, cfg.Format)
 	}
 
 	switch args[0] {
 	case "check":
 		if err := cfg.ValidateAuth(); err != nil {
-			return a.writeError("auth.missing_api_key", err.Error(), nil, cfg.Format, exitAuth)
+			return a.writeFailure(output.Failure{
+				Command: "auth.check",
+				Kind:    output.ErrorKindAuth,
+				Code:    "auth.missing_api_key",
+				Message: err.Error(),
+			}, cfg.Format)
 		}
 
 		cli := a.clientFactory(cfg, a.httpClient)
 		result, err := cli.AuthCheck(context.Background())
 		if err != nil {
 			if apiErr, ok := err.(*client.APIError); ok {
-				code := "auth.check_failed"
-				exitCode := exitAPI
-				if apiErr.StatusCode == http.StatusUnauthorized {
-					code = "auth.invalid_credentials"
-					exitCode = exitAuth
-				} else if apiErr.StatusCode == http.StatusForbidden {
-					code = "auth.insufficient_permissions"
+				failure := output.Failure{
+					Command:   "auth.check",
+					Kind:      output.ErrorKindAPI,
+					Code:      "auth.check_failed",
+					Message:   err.Error(),
+					Retryable: apiErr.StatusCode >= http.StatusInternalServerError || apiErr.StatusCode == http.StatusTooManyRequests,
+					Details: output.APIErrorDetails{
+						StatusCode: apiErr.StatusCode,
+						Body:       apiErr.Body,
+					},
 				}
 
-				return a.writeError(code, err.Error(), apiErr, cfg.Format, exitCode)
+				if apiErr.StatusCode == http.StatusUnauthorized {
+					failure.Kind = output.ErrorKindAuth
+					failure.Code = "auth.invalid_credentials"
+				} else if apiErr.StatusCode == http.StatusForbidden {
+					failure.Code = "auth.insufficient_permissions"
+				}
+
+				return a.writeFailure(failure, cfg.Format)
 			}
 
-			return a.writeError("auth.request_failed", err.Error(), nil, cfg.Format, exitInternal)
+			return a.writeFailure(output.Failure{
+				Command:   "auth.check",
+				Kind:      output.ErrorKindInternal,
+				Code:      "auth.request_failed",
+				Message:   err.Error(),
+				Retryable: true,
+			}, cfg.Format)
 		}
 
-		return a.writeSuccess("auth.check", result, cfg.Format)
+		return a.writeSuccess(output.Result{
+			Command: "auth.check",
+			Data:    result,
+			Text:    "auth ok",
+		}, cfg.Format)
 	default:
-		return a.writeError("auth.unknown_subcommand", fmt.Sprintf("unknown auth subcommand: %s", args[0]), nil, cfg.Format, exitUsage)
+		return a.writeFailure(output.Failure{
+			Command: "auth",
+			Kind:    output.ErrorKindUsage,
+			Code:    "auth.unknown_subcommand",
+			Message: fmt.Sprintf("unknown auth subcommand: %s", args[0]),
+		}, cfg.Format)
 	}
 }
 
-func (a *App) writeSuccess(command string, data any, format string) int {
+func (a *App) writeSuccess(result output.Result, format string) int {
 	if format == "text" {
-		msg := "ok"
-		if command == "auth.check" {
-			msg = "auth ok"
-		}
-		if err := output.WriteText(a.stdout, msg); err != nil {
+		if err := output.WriteSuccessText(a.stdout, result); err != nil {
 			fmt.Fprintf(a.stderr, "write error: %v\n", err)
-			return exitInternal
+			return int(output.ExitInternal)
 		}
 
-		return exitOK
+		return int(output.ExitOK)
 	}
 
-	if err := output.WriteJSON(a.stdout, output.Envelope{
-		OK:      true,
-		Command: command,
-		Data:    data,
-	}); err != nil {
+	if err := output.WriteSuccessJSON(a.stdout, result); err != nil {
 		fmt.Fprintf(a.stderr, "write error: %v\n", err)
-		return exitInternal
+		return int(output.ExitInternal)
 	}
 
-	return exitOK
+	return int(output.ExitOK)
 }
 
-func (a *App) writeError(code, message string, details any, format string, exitCode int) int {
+func (a *App) writeFailure(failure output.Failure, format string) int {
 	if format == "text" {
-		if err := output.WriteText(a.stderr, message); err != nil {
+		if err := output.WriteFailureText(a.stderr, failure); err != nil {
 			fmt.Fprintf(a.stderr, "write error: %v\n", err)
-			return exitInternal
+			return int(output.ExitInternal)
 		}
 
-		return exitCode
+		return int(failure.ExitCode())
 	}
 
-	err := output.WriteJSON(a.stdout, output.Envelope{
-		OK:      false,
-		Command: "error",
-		Error: &output.Error{
-			Code:    code,
-			Message: message,
-			Details: details,
-		},
-	})
-	if err != nil {
+	if err := output.WriteFailureJSON(a.stdout, failure); err != nil {
 		fmt.Fprintf(a.stderr, "write error: %v\n", err)
-		return exitInternal
+		return int(output.ExitInternal)
 	}
 
-	return exitCode
+	return int(failure.ExitCode())
 }
 
 func (a *App) writeUsage(format string) int {
@@ -186,7 +210,12 @@ func (a *App) writeUsage(format string) int {
 		"  version      Print CLI version",
 	}
 
-	return a.writeError("cli.usage", strings.Join(lines, "\n"), nil, format, exitUsage)
+	return a.writeFailure(output.Failure{
+		Command: "cli",
+		Kind:    output.ErrorKindUsage,
+		Code:    "cli.usage",
+		Message: strings.Join(lines, "\n"),
+	}, format)
 }
 
 func inferRequestedFormat(args []string) string {
