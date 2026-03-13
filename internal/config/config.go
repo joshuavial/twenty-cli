@@ -1,9 +1,11 @@
 package config
 
 import (
+	"encoding/json"
 	"errors"
 	"net/url"
 	"os"
+	"path/filepath"
 	"strings"
 )
 
@@ -16,9 +18,14 @@ type Config struct {
 }
 
 func New(apiKey, baseURL, format string) (Config, error) {
+	settings, err := loadSettings()
+	if err != nil {
+		return Config{}, err
+	}
+
 	cfg := Config{
-		APIKey:  strings.TrimSpace(firstNonEmpty(apiKey, os.Getenv("TWENTY_API_KEY"))),
-		BaseURL: strings.TrimSpace(firstNonEmpty(baseURL, os.Getenv("TWENTY_BASE_URL"), defaultBaseURL)),
+		APIKey:  strings.TrimSpace(firstNonEmpty(apiKey, os.Getenv("TWENTY_API_KEY"), settings.APIKey)),
+		BaseURL: strings.TrimSpace(firstNonEmpty(baseURL, os.Getenv("TWENTY_BASE_URL"), settings.BaseURL, defaultBaseURL)),
 		Format:  strings.TrimSpace(firstNonEmpty(format, "json")),
 	}
 
@@ -53,4 +60,44 @@ func firstNonEmpty(values ...string) string {
 	}
 
 	return ""
+}
+
+type settings struct {
+	APIKey  string `json:"api_key"`
+	BaseURL string `json:"base_url"`
+}
+
+func loadSettings() (settings, error) {
+	for _, path := range candidateSettingsPaths() {
+		data, err := os.ReadFile(path)
+		if errors.Is(err, os.ErrNotExist) {
+			continue
+		}
+		if err != nil {
+			return settings{}, err
+		}
+
+		var cfg settings
+		if err := json.Unmarshal(data, &cfg); err != nil {
+			return settings{}, err
+		}
+
+		return cfg, nil
+	}
+
+	return settings{}, nil
+}
+
+func candidateSettingsPaths() []string {
+	paths := make([]string, 0, 2)
+
+	if wd, err := os.Getwd(); err == nil {
+		paths = append(paths, filepath.Join(wd, ".twenty", "settings"))
+	}
+
+	if homeDir, err := os.UserHomeDir(); err == nil {
+		paths = append(paths, filepath.Join(homeDir, ".twenty", "settings"))
+	}
+
+	return paths
 }
