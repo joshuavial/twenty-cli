@@ -94,9 +94,10 @@ func New(cfg config.Config, httpClient HTTPDoer) *Client {
 }
 
 func (c *Client) AuthCheck(ctx context.Context) (AuthCheckResult, error) {
-	endpoint := c.baseURL + "/rest/metadata"
+	endpoint := c.baseURL + "/metadata"
+	body := map[string]string{"query": "query CLIAuthCheck { __typename }"}
 
-	resp, err := c.doJSONRequest(ctx, http.MethodGet, endpoint, nil)
+	resp, err := c.doJSONRequest(ctx, http.MethodPost, endpoint, body)
 	if err != nil {
 		return AuthCheckResult{}, err
 	}

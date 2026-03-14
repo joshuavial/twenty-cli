@@ -41,7 +41,7 @@ func TestAuthCheckJSONSuccess(t *testing.T) {
 		return authCheckerStub{
 			result: client.AuthCheckResult{
 				StatusCode: 200,
-				Endpoint:   "/rest/people?limit=1&depth=0",
+				Endpoint:   "/metadata",
 			},
 		}
 	}

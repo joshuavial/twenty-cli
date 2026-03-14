@@ -24,14 +24,16 @@ func TestAuthCheckUsesExpectedEndpointAndAuthHeader(t *testing.T) {
 
 	var gotPath string
 	var gotAuth string
+	var gotContentType string
 
 	cli := New(cfg, roundTripFunc(func(req *http.Request) (*http.Response, error) {
 		gotPath = req.URL.String()
 		gotAuth = req.Header.Get("Authorization")
+		gotContentType = req.Header.Get("Content-Type")
 
 		return &http.Response{
 			StatusCode: http.StatusOK,
-			Body:       io.NopCloser(strings.NewReader(`{"ok":true}`)),
+			Body:       io.NopCloser(strings.NewReader(`{"data":{"__typename":"Query"}}`)),
 		}, nil
 	}))
 
@@ -40,7 +42,7 @@ func TestAuthCheckUsesExpectedEndpointAndAuthHeader(t *testing.T) {
 		t.Fatalf("AuthCheck() error = %v", err)
 	}
 
-	if gotPath != "https://api.twenty.com/rest/metadata" {
+	if gotPath != "https://api.twenty.com/metadata" {
 		t.Fatalf("path = %q", gotPath)
 	}
 
@@ -48,7 +50,11 @@ func TestAuthCheckUsesExpectedEndpointAndAuthHeader(t *testing.T) {
 		t.Fatalf("Authorization = %q", gotAuth)
 	}
 
-	if result.Endpoint != "/rest/metadata" {
+	if gotContentType != "application/json" {
+		t.Fatalf("Content-Type = %q", gotContentType)
+	}
+
+	if result.Endpoint != "/metadata" {
 		t.Fatalf("Endpoint = %q", result.Endpoint)
 	}
 }

@@ -8,17 +8,20 @@ import (
 
 func TestAuthCheckReadsConfigFileAndSnapshotsJSON(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path != "/rest/metadata" {
+		if r.URL.Path != "/metadata" {
 			http.NotFound(w, r)
 			return
 		}
 		if got := r.Header.Get("Authorization"); got != "Bearer config-secret" {
 			t.Fatalf("Authorization = %q, want Bearer config-secret", got)
 		}
+		if got := r.Header.Get("Content-Type"); got != "application/json" {
+			t.Fatalf("Content-Type = %q, want application/json", got)
+		}
 
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
-		_, _ = w.Write([]byte(`{"ok":true}`))
+		_, _ = w.Write([]byte(`{"data":{"__typename":"Query"}}`))
 	}))
 	defer server.Close()
 
@@ -39,13 +42,20 @@ func TestAuthCheckReadsConfigFileAndSnapshotsJSON(t *testing.T) {
 
 func TestAuthCheckReadsEnvConfigAndSnapshotsJSON(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/metadata" {
+			http.NotFound(w, r)
+			return
+		}
 		if got := r.Header.Get("Authorization"); got != "Bearer env-secret" {
 			t.Fatalf("Authorization = %q, want Bearer env-secret", got)
+		}
+		if got := r.Header.Get("Content-Type"); got != "application/json" {
+			t.Fatalf("Content-Type = %q, want application/json", got)
 		}
 
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
-		_, _ = w.Write([]byte(`{"ok":true}`))
+		_, _ = w.Write([]byte(`{"data":{"__typename":"Query"}}`))
 	}))
 	defer server.Close()
 
