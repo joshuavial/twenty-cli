@@ -17,11 +17,7 @@ type App struct {
 	stdout        io.Writer
 	stderr        io.Writer
 	httpClient    client.HTTPDoer
-	clientFactory func(config.Config, client.HTTPDoer) authChecker
-}
-
-type authChecker interface {
-	AuthCheck(ctx context.Context) (client.AuthCheckResult, error)
+	clientFactory func(config.Config, client.HTTPDoer) twentyClient
 }
 
 func New(stdout, stderr io.Writer) *App {
@@ -29,7 +25,7 @@ func New(stdout, stderr io.Writer) *App {
 		stdout:     stdout,
 		stderr:     stderr,
 		httpClient: http.DefaultClient,
-		clientFactory: func(cfg config.Config, doer client.HTTPDoer) authChecker {
+		clientFactory: func(cfg config.Config, doer client.HTTPDoer) twentyClient {
 			return client.New(cfg, doer)
 		},
 	}
@@ -59,6 +55,8 @@ func (a *App) Run(args []string) int {
 			Data:    map[string]string{"version": "dev"},
 			Text:    "dev",
 		}, cfg.Format)
+	case "person", "people", "contact", "contacts", "company", "companies", "deal", "deals", "opportunity", "opportunities":
+		return a.runEntity(cfg, remaining[0], remaining[1:])
 	default:
 		return a.writeFailure(output.Failure{
 			Command: "cli",
@@ -134,6 +132,7 @@ func (a *App) runAuth(cfg config.Config, args []string) int {
 					failure.Kind = output.ErrorKindAuth
 					failure.Code = "auth.invalid_credentials"
 				} else if apiErr.StatusCode == http.StatusForbidden {
+					failure.Kind = output.ErrorKindAuth
 					failure.Code = "auth.insufficient_permissions"
 				}
 
@@ -206,8 +205,20 @@ func (a *App) writeUsage(format string) int {
 		"  twenty [--api-key KEY] [--base-url URL] [--format json|text] <command>",
 		"",
 		"Commands:",
-		"  auth check   Validate connectivity and API credentials",
-		"  version      Print CLI version",
+		"  auth check      Validate connectivity and API credentials",
+		"  people search   Search people",
+		"  person get      Fetch one person by ID",
+		"  person create   Create one person",
+		"  person update   Update one person",
+		"  companies search Search companies",
+		"  company get     Fetch one company by ID",
+		"  company create  Create one company",
+		"  company update  Update one company",
+		"  deals search    Search deals",
+		"  deal get        Fetch one deal by ID",
+		"  deal create     Create one deal",
+		"  deal update     Update one deal",
+		"  version         Print CLI version",
 	}
 
 	return a.writeFailure(output.Failure{

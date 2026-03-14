@@ -1,0 +1,25 @@
+{
+  "command": "people.search",
+  "data": [
+    {
+      "emails": {
+        "primaryEmail": "ada@example.com"
+      },
+      "id": "person_123",
+      "name": {
+        "firstName": "Ada",
+        "lastName": "Lovelace"
+      }
+    }
+  ],
+  "meta": {
+    "page_info": {
+      "limit": 5,
+      "next_cursor": "cursor_end",
+      "prev_cursor": "cursor_start",
+      "returned": 1,
+      "total": 2
+    }
+  },
+  "ok": true
+}

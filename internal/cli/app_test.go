@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"net/url"
 	"testing"
 
 	"github.com/jv/twenty-crm-cli/internal/client"
@@ -12,13 +13,35 @@ import (
 	"github.com/jv/twenty-crm-cli/internal/output"
 )
 
-type authCheckerStub struct {
+type clientStub struct {
 	result client.AuthCheckResult
 	err    error
+	list   client.ListResult
+	record client.RecordResult
 }
 
-func (s authCheckerStub) AuthCheck(context.Context) (client.AuthCheckResult, error) {
+func (s clientStub) AuthCheck(context.Context) (client.AuthCheckResult, error) {
 	return s.result, s.err
+}
+
+func (s clientStub) MetadataObjects(context.Context) ([]client.MetadataObject, error) {
+	return nil, nil
+}
+
+func (s clientStub) ListRecords(context.Context, string, url.Values) (client.ListResult, error) {
+	return s.list, s.err
+}
+
+func (s clientStub) GetRecord(context.Context, string, string, string, url.Values) (client.RecordResult, error) {
+	return s.record, s.err
+}
+
+func (s clientStub) CreateRecord(context.Context, string, string, map[string]any) (client.RecordResult, error) {
+	return s.record, s.err
+}
+
+func (s clientStub) UpdateRecord(context.Context, string, string, string, map[string]any) (client.RecordResult, error) {
+	return s.record, s.err
 }
 
 func decodeEnvelope(t *testing.T, data string) output.Envelope {
@@ -37,8 +60,8 @@ func TestAuthCheckJSONSuccess(t *testing.T) {
 	var stderr bytes.Buffer
 
 	app := New(&stdout, &stderr)
-	app.clientFactory = func(config.Config, client.HTTPDoer) authChecker {
-		return authCheckerStub{
+	app.clientFactory = func(config.Config, client.HTTPDoer) twentyClient {
+		return clientStub{
 			result: client.AuthCheckResult{
 				StatusCode: 200,
 				Endpoint:   "/metadata",
@@ -122,8 +145,8 @@ func TestAuthCheckForbiddenReturnsPermissionError(t *testing.T) {
 	var stderr bytes.Buffer
 
 	app := New(&stdout, &stderr)
-	app.clientFactory = func(config.Config, client.HTTPDoer) authChecker {
-		return authCheckerStub{
+	app.clientFactory = func(config.Config, client.HTTPDoer) twentyClient {
+		return clientStub{
 			err: &client.APIError{
 				StatusCode: 403,
 				Body:       `{"error":"forbidden"}`,
@@ -132,16 +155,16 @@ func TestAuthCheckForbiddenReturnsPermissionError(t *testing.T) {
 	}
 
 	code := app.Run([]string{"--api-key", "secret", "auth", "check"})
-	if code != int(output.ExitAPI) {
-		t.Fatalf("Run() code = %d, want %d", code, output.ExitAPI)
+	if code != int(output.ExitAuth) {
+		t.Fatalf("Run() code = %d, want %d", code, output.ExitAuth)
 	}
 
 	envelope := decodeEnvelope(t, stdout.String())
 	if envelope.Error == nil || envelope.Error.Code != "auth.insufficient_permissions" {
 		t.Fatalf("stdout = %s", stdout.String())
 	}
-	if envelope.Error.Kind != output.ErrorKindAPI {
-		t.Fatalf("Error.Kind = %q, want %q", envelope.Error.Kind, output.ErrorKindAPI)
+	if envelope.Error.Kind != output.ErrorKindAuth {
+		t.Fatalf("Error.Kind = %q, want %q", envelope.Error.Kind, output.ErrorKindAuth)
 	}
 }
 
@@ -150,8 +173,8 @@ func TestAuthCheckUnauthorizedReturnsInvalidCredentials(t *testing.T) {
 	var stderr bytes.Buffer
 
 	app := New(&stdout, &stderr)
-	app.clientFactory = func(config.Config, client.HTTPDoer) authChecker {
-		return authCheckerStub{
+	app.clientFactory = func(config.Config, client.HTTPDoer) twentyClient {
+		return clientStub{
 			err: &client.APIError{
 				StatusCode: 401,
 				Body:       `{"error":"unauthorized"}`,
@@ -178,8 +201,8 @@ func TestAuthCheckRequestFailureReturnsInternalError(t *testing.T) {
 	var stderr bytes.Buffer
 
 	app := New(&stdout, &stderr)
-	app.clientFactory = func(config.Config, client.HTTPDoer) authChecker {
-		return authCheckerStub{
+	app.clientFactory = func(config.Config, client.HTTPDoer) twentyClient {
+		return clientStub{
 			err: errors.New("dial failed"),
 		}
 	}
@@ -195,5 +218,29 @@ func TestAuthCheckRequestFailureReturnsInternalError(t *testing.T) {
 	}
 	if !envelope.Error.Retryable {
 		t.Fatalf("Retryable = false, want true")
+	}
+}
+
+func TestPersonGetSuccess(t *testing.T) {
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+
+	app := New(&stdout, &stderr)
+	app.clientFactory = func(config.Config, client.HTTPDoer) twentyClient {
+		return clientStub{
+			record: client.RecordResult{
+				Record: map[string]any{"id": "person_123"},
+			},
+		}
+	}
+
+	code := app.Run([]string{"--api-key", "secret", "person", "get", "--id", "person_123"})
+	if code != int(output.ExitOK) {
+		t.Fatalf("Run() code = %d, want %d", code, output.ExitOK)
+	}
+
+	envelope := decodeEnvelope(t, stdout.String())
+	if !envelope.OK || envelope.Command != "person.get" {
+		t.Fatalf("stdout = %s", stdout.String())
 	}
 }

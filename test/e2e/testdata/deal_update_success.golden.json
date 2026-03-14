@@ -1,0 +1,9 @@
+{
+  "command": "deal.update",
+  "data": {
+    "id": "deal_123",
+    "name": "Enterprise Expansion",
+    "stage": "PROPOSAL"
+  },
+  "ok": true
+}

@@ -1,0 +1,14 @@
+{
+  "command": "person.create",
+  "data": {
+    "emails": {
+      "primaryEmail": "ada@example.com"
+    },
+    "id": "person_new",
+    "name": {
+      "firstName": "Ada",
+      "lastName": "Lovelace"
+    }
+  },
+  "ok": true
+}

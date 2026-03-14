@@ -177,3 +177,63 @@ func TestMetadataObjectsUsesMetadataEndpointAndParsesObjects(t *testing.T) {
 		t.Fatalf("fields = %#v", objects[0].Fields)
 	}
 }
+
+func TestListRecordsUsesRestCollectionRoute(t *testing.T) {
+	cfg, err := config.New("secret", "https://api.twenty.com", "json")
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+
+	var gotPath string
+	cli := New(cfg, roundTripFunc(func(req *http.Request) (*http.Response, error) {
+		gotPath = req.URL.String()
+		return &http.Response{
+			StatusCode: http.StatusOK,
+			Body: io.NopCloser(strings.NewReader(`{
+				"data": {"people": [{"id": "person_123"}]},
+				"totalCount": 1,
+				"pageInfo": {"startCursor":"a","endCursor":"b","hasNextPage":false,"hasPreviousPage":false}
+			}`)),
+		}, nil
+	}))
+
+	result, err := cli.ListRecords(context.Background(), "people", nil)
+	if err != nil {
+		t.Fatalf("ListRecords() error = %v", err)
+	}
+	if gotPath != "https://api.twenty.com/rest/people" {
+		t.Fatalf("path = %q", gotPath)
+	}
+	if len(result.Records) != 1 || result.Records[0]["id"] != "person_123" {
+		t.Fatalf("records = %#v", result.Records)
+	}
+}
+
+func TestCreateRecordUsesExpectedActionKey(t *testing.T) {
+	cfg, err := config.New("secret", "https://api.twenty.com", "json")
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+
+	var gotPath string
+	cli := New(cfg, roundTripFunc(func(req *http.Request) (*http.Response, error) {
+		gotPath = req.URL.String()
+		return &http.Response{
+			StatusCode: http.StatusOK,
+			Body: io.NopCloser(strings.NewReader(`{
+				"data": {"createCompany": {"id": "company_123", "name": "Acme"}}
+			}`)),
+		}, nil
+	}))
+
+	result, err := cli.CreateRecord(context.Background(), "companies", "createCompany", map[string]any{"name": "Acme"})
+	if err != nil {
+		t.Fatalf("CreateRecord() error = %v", err)
+	}
+	if gotPath != "https://api.twenty.com/rest/companies" {
+		t.Fatalf("path = %q", gotPath)
+	}
+	if result.Record["id"] != "company_123" {
+		t.Fatalf("record = %#v", result.Record)
+	}
+}
