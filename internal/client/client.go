@@ -111,6 +111,21 @@ func (c *Client) AuthCheck(ctx context.Context) (AuthCheckResult, error) {
 		}
 	}
 
+	var result struct {
+		Errors []json.RawMessage `json:"errors"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		return AuthCheckResult{}, err
+	}
+	if len(result.Errors) > 0 {
+		payload, _ := json.Marshal(result.Errors)
+		statusCode := statusCodeForGraphQLErrors(result.Errors, resp.StatusCode)
+		return AuthCheckResult{}, &APIError{
+			StatusCode: statusCode,
+			Body:       string(payload),
+		}
+	}
+
 	return AuthCheckResult{
 		StatusCode: resp.StatusCode,
 		Endpoint:   sanitizeEndpoint(endpoint),
@@ -223,6 +238,28 @@ func sanitizeEndpoint(raw string) string {
 	}
 
 	return parsed.Path + "?" + parsed.RawQuery
+}
+
+func statusCodeForGraphQLErrors(errors []json.RawMessage, fallback int) int {
+	for _, raw := range errors {
+		var item struct {
+			Extensions struct {
+				Code    string `json:"code"`
+				SubCode string `json:"subCode"`
+			} `json:"extensions"`
+		}
+		if err := json.Unmarshal(raw, &item); err != nil {
+			continue
+		}
+		if item.Extensions.Code == "UNAUTHENTICATED" || item.Extensions.SubCode == "UNAUTHENTICATED" {
+			return http.StatusUnauthorized
+		}
+		if item.Extensions.Code == "FORBIDDEN" || item.Extensions.SubCode == "FORBIDDEN" {
+			return http.StatusForbidden
+		}
+	}
+
+	return fallback
 }
 
 func (c *Client) doJSONRequest(ctx context.Context, method, endpoint string, body any) (*http.Response, error) {

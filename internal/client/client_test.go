@@ -59,6 +59,46 @@ func TestAuthCheckUsesExpectedEndpointAndAuthHeader(t *testing.T) {
 	}
 }
 
+func TestAuthCheckReturnsUnauthorizedForGraphQLUnauthenticatedErrors(t *testing.T) {
+	cfg, err := config.New("bad-key", "https://api.twenty.com", "json")
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+
+	cli := New(cfg, roundTripFunc(func(req *http.Request) (*http.Response, error) {
+		return &http.Response{
+			StatusCode: http.StatusOK,
+			Body: io.NopCloser(strings.NewReader(`{
+				"errors": [
+					{
+						"message": "No payload",
+						"extensions": {
+							"code": "UNAUTHENTICATED",
+							"subCode": "UNAUTHENTICATED"
+						}
+					}
+				]
+			}`)),
+		}, nil
+	}))
+
+	_, err = cli.AuthCheck(context.Background())
+	if err == nil {
+		t.Fatal("AuthCheck() error = nil")
+	}
+
+	apiErr, ok := err.(*APIError)
+	if !ok {
+		t.Fatalf("error type = %T", err)
+	}
+	if apiErr.StatusCode != http.StatusUnauthorized {
+		t.Fatalf("StatusCode = %d", apiErr.StatusCode)
+	}
+	if !strings.Contains(apiErr.Body, "UNAUTHENTICATED") {
+		t.Fatalf("Body = %q", apiErr.Body)
+	}
+}
+
 func TestMetadataObjectsUsesMetadataEndpointAndParsesObjects(t *testing.T) {
 	cfg, err := config.New("secret", "https://api.twenty.com", "json")
 	if err != nil {

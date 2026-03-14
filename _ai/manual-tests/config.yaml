@@ -1,0 +1,21 @@
+server_instructions: |
+  Local Twenty dev server is expected at http://localhost:3000.
+  Start and seed it with:
+    ./dev reset
+  Verify health with:
+    curl -fsS http://localhost:3000/healthz
+
+categories:
+  foundation:
+    pattern: "MT-FOUND-*"
+    description: "CLI foundation and local dev server checks"
+  auth:
+    pattern: "MT-AUTH-*"
+    description: "Auth and config resolution checks against local Twenty"
+
+setup: |
+  Prerequisites before running this plan:
+  - The repo worktree is /Users/jv/gt/twenty_crm_cli/crew/conduit
+  - Local Twenty stack is healthy via ./dev ps
+  - ./.twenty/settings exists from ./dev reset
+  - Demo workspace credentials should exist in ./.twenty/dev-server.env
