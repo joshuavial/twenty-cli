@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/url"
+	"slices"
 	"strconv"
 	"strings"
 
@@ -158,15 +159,12 @@ func (a *App) runEntitySearch(cli twentyClient, cfg config.Config, entity entity
 		queryValues.Set("ending_before", endingBefore)
 	}
 
-	result, err := cli.ListRecords(context.Background(), entity.pluralRoute, queryValues)
+	results, err := searchEntityRecords(cli, entity, queryValues, strings.TrimSpace(query))
 	if err != nil {
 		return a.writeClientError(entity.pluralCmd+".search", cfg.Format, err)
 	}
 
-	records := result.Records
-	if strings.TrimSpace(query) != "" {
-		records = filterRecords(records, query)
-	}
+	records := results.Records
 	if limit > 0 && len(records) > limit {
 		records = records[:limit]
 	}
@@ -178,9 +176,9 @@ func (a *App) runEntitySearch(cli twentyClient, cfg config.Config, entity entity
 			PageInfo: &output.PageInfo{
 				Limit:      limit,
 				Returned:   len(records),
-				Total:      result.TotalCount,
-				NextCursor: result.PageInfo.EndCursor,
-				PrevCursor: result.PageInfo.StartCursor,
+				Total:      results.TotalCount,
+				NextCursor: results.PageInfo.EndCursor,
+				PrevCursor: results.PageInfo.StartCursor,
 			},
 		},
 		Text: fmt.Sprintf("%d %s", len(records), entity.pluralCmd),
@@ -303,68 +301,84 @@ type ioDiscard struct{}
 
 func (ioDiscard) Write(p []byte) (int, error) { return len(p), nil }
 
-func filterRecords(records []map[string]any, query string) []map[string]any {
-	query = strings.ToLower(strings.TrimSpace(query))
+func searchEntityRecords(cli twentyClient, entity entityDef, baseQuery url.Values, query string) (client.ListResult, error) {
 	if query == "" {
-		return records
+		return cli.ListRecords(context.Background(), entity.pluralRoute, baseQuery)
 	}
 
-	filtered := make([]map[string]any, 0, len(records))
-	for _, record := range records {
-		if matchesRecordQuery(record, query) {
-			filtered = append(filtered, record)
-		}
-	}
-	return filtered
-}
+	filters := filtersForEntityQuery(entity, query)
+	var combined []map[string]any
+	var pageInfo client.PageInfo
+	totalCount := 0
+	seen := map[string]struct{}{}
 
-func matchesRecordQuery(record map[string]any, query string) bool {
-	for key, value := range record {
-		if shouldSkipSearchKey(key) {
-			continue
-		}
-		if valueMatchesQuery(key, value, query) {
-			return true
-		}
-	}
-	return false
-}
+	for _, filter := range filters {
+		queryValues := cloneValues(baseQuery)
+		queryValues.Set("filter", filter)
 
-func valueMatchesQuery(key string, value any, query string) bool {
-	switch typed := value.(type) {
-	case string:
-		return strings.Contains(strings.ToLower(typed), query)
-	case map[string]any:
-		for nestedKey, nestedValue := range typed {
-			if shouldSkipSearchKey(nestedKey) {
+		result, err := cli.ListRecords(context.Background(), entity.pluralRoute, queryValues)
+		if err != nil {
+			return client.ListResult{}, err
+		}
+
+		if totalCount == 0 {
+			totalCount = result.TotalCount
+			pageInfo = result.PageInfo
+		}
+
+		for _, record := range result.Records {
+			recordID, _ := record["id"].(string)
+			if recordID == "" {
+				combined = append(combined, record)
 				continue
 			}
-			if valueMatchesQuery(nestedKey, nestedValue, query) {
-				return true
+			if _, ok := seen[recordID]; ok {
+				continue
 			}
-		}
-	case []any:
-		for _, item := range typed {
-			if valueMatchesQuery(key, item, query) {
-				return true
-			}
+			seen[recordID] = struct{}{}
+			combined = append(combined, record)
 		}
 	}
-	return false
+
+	return client.ListResult{
+		Records:    combined,
+		TotalCount: len(combined),
+		PageInfo:   pageInfo,
+	}, nil
 }
 
-func shouldSkipSearchKey(key string) bool {
-	key = strings.ToLower(key)
-	if strings.HasSuffix(key, "id") || strings.HasSuffix(key, "at") {
-		return true
-	}
+func filtersForEntityQuery(entity entityDef, query string) []string {
+	query = strings.TrimSpace(query)
+	escaped := "%" + query + "%"
 
-	switch key {
-	case "searchvector", "createdby", "updatedby", "deletedat", "position", "context":
-		return true
+	switch entity.domain {
+	case "person":
+		if strings.Contains(query, "@") {
+			return []string{"emails.primaryEmail[ilike]:" + escaped}
+		}
+		return []string{
+			"name.firstName[ilike]:" + escaped,
+			"name.lastName[ilike]:" + escaped,
+			"emails.primaryEmail[ilike]:" + escaped,
+		}
+	case "company":
+		return []string{
+			"name[ilike]:" + escaped,
+			"domainName.primaryLinkUrl[ilike]:" + escaped,
+		}
+	case "deal":
+		return []string{"name[ilike]:" + escaped}
 	default:
-		return false
+		return []string{"name[ilike]:" + escaped}
 	}
+}
+
+func cloneValues(values url.Values) url.Values {
+	cloned := url.Values{}
+	for key, current := range values {
+		cloned[key] = slices.Clone(current)
+	}
+	return cloned
 }
 
 func parseEntityMutation(entity entityDef, action string, args []string) (map[string]any, output.Failure, bool) {
