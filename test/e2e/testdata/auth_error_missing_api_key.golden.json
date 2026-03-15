@@ -3,7 +3,7 @@
   "error": {
     "code": "auth.missing_api_key",
     "kind": "auth",
-    "message": "missing API key; set TWENTY_API_KEY or pass --api-key"
+    "message": "missing API key; run `twenty auth login`, set TWENTY_API_KEY, or pass --api-key"
   },
   "ok": false
 }

@@ -12,6 +12,9 @@ categories:
   auth:
     pattern: "MT-AUTH-*"
     description: "Auth and config resolution checks against local Twenty"
+  onboarding:
+    pattern: "MT-ONB-*"
+    description: "First-run install and no-config onboarding experience"
   entities:
     pattern: "MT-ENT-*"
     description: "People, company, and deal search/get/create/update flows"

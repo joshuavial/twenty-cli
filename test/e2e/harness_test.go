@@ -36,6 +36,8 @@ type Result struct {
 	ExitCode int
 	Stdout   string
 	Stderr   string
+	HomeDir  string
+	WorkDir  string
 }
 
 var (
@@ -86,6 +88,8 @@ func (h *Harness) Run(opts RunOptions) Result {
 		ExitCode: 0,
 		Stdout:   stdout.String(),
 		Stderr:   stderr.String(),
+		HomeDir:  homeDir,
+		WorkDir:  workDir,
 	}
 
 	if err == nil {

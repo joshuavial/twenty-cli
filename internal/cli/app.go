@@ -1,11 +1,14 @@
 package cli
 
 import (
+	"bufio"
 	"context"
+	"errors"
 	"flag"
 	"fmt"
 	"io"
 	"net/http"
+	"os"
 	"strings"
 
 	"github.com/jv/twenty-crm-cli/internal/client"
@@ -14,20 +17,24 @@ import (
 )
 
 type App struct {
+	stdin         io.Reader
 	stdout        io.Writer
 	stderr        io.Writer
 	httpClient    client.HTTPDoer
 	clientFactory func(config.Config, client.HTTPDoer) twentyClient
+	isTTY         func() bool
 }
 
-func New(stdout, stderr io.Writer) *App {
+func New(stdin io.Reader, stdout, stderr io.Writer) *App {
 	return &App{
+		stdin:      stdin,
 		stdout:     stdout,
 		stderr:     stderr,
 		httpClient: http.DefaultClient,
 		clientFactory: func(cfg config.Config, doer client.HTTPDoer) twentyClient {
 			return client.New(cfg, doer)
 		},
+		isTTY: defaultIsTTY,
 	}
 }
 
@@ -37,8 +44,8 @@ func (a *App) Run(args []string) int {
 		return a.writeFailure(output.Failure{
 			Command: "cli",
 			Kind:    output.ErrorKindUsage,
-			Code:    "cli.parse",
-			Message: err.Error(),
+			Code:    errorCodeForConfigError(err),
+			Message: errorMessageForConfigError(err),
 		}, inferRequestedFormat(args))
 	}
 
@@ -85,12 +92,22 @@ func (a *App) parseRoot(args []string) (config.Config, []string, error) {
 		return config.Config{}, nil, err
 	}
 
+	remaining := fs.Args()
 	cfg, err := config.New(apiKey, baseURL, format)
-	if err != nil {
-		return config.Config{}, nil, err
+	if err == nil {
+		return cfg, remaining, nil
 	}
 
-	return cfg, fs.Args(), nil
+	var settingsErr *config.SettingsError
+	if errors.As(err, &settingsErr) && len(remaining) >= 2 && remaining[0] == "auth" && remaining[1] == "login" {
+		setupCfg, setupErr := config.NewWithoutSettings(apiKey, baseURL, format)
+		if setupErr != nil {
+			return config.Config{}, nil, setupErr
+		}
+		return setupCfg, remaining, nil
+	}
+
+	return config.Config{}, nil, err
 }
 
 func (a *App) runAuth(cfg config.Config, args []string) int {
@@ -99,62 +116,15 @@ func (a *App) runAuth(cfg config.Config, args []string) int {
 			Command: "auth",
 			Kind:    output.ErrorKindUsage,
 			Code:    "auth.usage",
-			Message: "expected subcommand: check",
+			Message: "expected subcommand: check or login",
 		}, cfg.Format)
 	}
 
 	switch args[0] {
 	case "check":
-		if err := cfg.ValidateAuth(); err != nil {
-			return a.writeFailure(output.Failure{
-				Command: "auth.check",
-				Kind:    output.ErrorKindAuth,
-				Code:    "auth.missing_api_key",
-				Message: err.Error(),
-			}, cfg.Format)
-		}
-
-		cli := a.clientFactory(cfg, a.httpClient)
-		result, err := cli.AuthCheck(context.Background())
-		if err != nil {
-			if apiErr, ok := err.(*client.APIError); ok {
-				failure := output.Failure{
-					Command:   "auth.check",
-					Kind:      output.ErrorKindAPI,
-					Code:      "auth.check_failed",
-					Message:   err.Error(),
-					Retryable: apiErr.StatusCode >= http.StatusInternalServerError || apiErr.StatusCode == http.StatusTooManyRequests,
-					Details: output.APIErrorDetails{
-						StatusCode: apiErr.StatusCode,
-						Body:       apiErr.Body,
-					},
-				}
-
-				if apiErr.StatusCode == http.StatusUnauthorized {
-					failure.Kind = output.ErrorKindAuth
-					failure.Code = "auth.invalid_credentials"
-				} else if apiErr.StatusCode == http.StatusForbidden {
-					failure.Kind = output.ErrorKindAuth
-					failure.Code = "auth.insufficient_permissions"
-				}
-
-				return a.writeFailure(failure, cfg.Format)
-			}
-
-			return a.writeFailure(output.Failure{
-				Command:   "auth.check",
-				Kind:      output.ErrorKindInternal,
-				Code:      "auth.request_failed",
-				Message:   err.Error(),
-				Retryable: true,
-			}, cfg.Format)
-		}
-
-		return a.writeSuccess(output.Result{
-			Command: "auth.check",
-			Data:    result,
-			Text:    "auth ok",
-		}, cfg.Format)
+		return a.runAuthCheck(cfg)
+	case "login":
+		return a.runAuthLogin(cfg, args[1:])
 	default:
 		return a.writeFailure(output.Failure{
 			Command: "auth",
@@ -163,6 +133,184 @@ func (a *App) runAuth(cfg config.Config, args []string) int {
 			Message: fmt.Sprintf("unknown auth subcommand: %s", args[0]),
 		}, cfg.Format)
 	}
+}
+
+func (a *App) runAuthCheck(cfg config.Config) int {
+	if err := cfg.ValidateAuth(); err != nil {
+		return a.writeFailure(output.Failure{
+			Command: "auth.check",
+			Kind:    output.ErrorKindAuth,
+			Code:    "auth.missing_api_key",
+			Message: "missing API key; run `twenty auth login`, set TWENTY_API_KEY, or pass --api-key",
+		}, cfg.Format)
+	}
+
+	cli := a.clientFactory(cfg, a.httpClient)
+	result, err := cli.AuthCheck(context.Background())
+	if err != nil {
+		if apiErr, ok := err.(*client.APIError); ok {
+			failure := output.Failure{
+				Command:   "auth.check",
+				Kind:      output.ErrorKindAPI,
+				Code:      "auth.check_failed",
+				Message:   err.Error(),
+				Retryable: apiErr.StatusCode >= http.StatusInternalServerError || apiErr.StatusCode == http.StatusTooManyRequests,
+				Details: output.APIErrorDetails{
+					StatusCode: apiErr.StatusCode,
+					Body:       apiErr.Body,
+				},
+			}
+
+			if apiErr.StatusCode == http.StatusUnauthorized {
+				failure.Kind = output.ErrorKindAuth
+				failure.Code = "auth.invalid_credentials"
+			} else if apiErr.StatusCode == http.StatusForbidden {
+				failure.Kind = output.ErrorKindAuth
+				failure.Code = "auth.insufficient_permissions"
+			}
+
+			return a.writeFailure(failure, cfg.Format)
+		}
+
+		return a.writeFailure(output.Failure{
+			Command:   "auth.check",
+			Kind:      output.ErrorKindInternal,
+			Code:      "auth.request_failed",
+			Message:   err.Error(),
+			Retryable: true,
+		}, cfg.Format)
+	}
+
+	return a.writeSuccess(output.Result{
+		Command: "auth.check",
+		Data:    result,
+		Text:    "auth ok",
+	}, cfg.Format)
+}
+
+func (a *App) runAuthLogin(cfg config.Config, args []string) int {
+	fs := flag.NewFlagSet("auth.login", flag.ContinueOnError)
+	fs.SetOutput(io.Discard)
+
+	var apiKey string
+	var baseURL string
+	var scope string
+	var overwrite bool
+
+	fs.StringVar(&apiKey, "api-key", cfg.APIKey, "Twenty API key")
+	fs.StringVar(&baseURL, "base-url", cfg.BaseURL, "Twenty base URL")
+	fs.StringVar(&scope, "scope", string(config.SettingsScopeHome), "Settings scope: home|project")
+	fs.BoolVar(&overwrite, "overwrite", false, "Overwrite existing settings file")
+
+	if err := fs.Parse(args); err != nil {
+		return a.writeFailure(output.Failure{
+			Command: "auth.login",
+			Kind:    output.ErrorKindUsage,
+			Code:    "cli.parse",
+			Message: err.Error(),
+		}, cfg.Format)
+	}
+
+	apiKey = strings.TrimSpace(apiKey)
+	baseURL = strings.TrimSpace(baseURL)
+	if a.isTTY() {
+		if apiKey == "" {
+			value, err := a.prompt("API key: ")
+			if err != nil {
+				return a.writeFailure(output.Failure{
+					Command:   "auth.login",
+					Kind:      output.ErrorKindInternal,
+					Code:      "auth.login.prompt_failed",
+					Message:   err.Error(),
+					Retryable: true,
+				}, cfg.Format)
+			}
+			apiKey = value
+		}
+		if baseURL == "" {
+			value, err := a.prompt("Base URL [" + cfg.BaseURL + "]: ")
+			if err != nil {
+				return a.writeFailure(output.Failure{
+					Command:   "auth.login",
+					Kind:      output.ErrorKindInternal,
+					Code:      "auth.login.prompt_failed",
+					Message:   err.Error(),
+					Retryable: true,
+				}, cfg.Format)
+			}
+			if value != "" {
+				baseURL = value
+			}
+		}
+	}
+
+	setupCfg, err := config.NewWithoutSettings(apiKey, baseURL, cfg.Format)
+	if err != nil {
+		return a.writeFailure(output.Failure{
+			Command: "auth.login",
+			Kind:    output.ErrorKindUsage,
+			Code:    "cli.parse",
+			Message: err.Error(),
+		}, cfg.Format)
+	}
+	if err := setupCfg.ValidateAuth(); err != nil {
+		return a.writeFailure(output.Failure{
+			Command: "auth.login",
+			Kind:    output.ErrorKindAuth,
+			Code:    "auth.missing_api_key",
+			Message: "missing API key; pass --api-key or run `twenty auth login` interactively from a TTY",
+		}, cfg.Format)
+	}
+
+	authCli := a.clientFactory(setupCfg, a.httpClient)
+	check, err := authCli.AuthCheck(context.Background())
+	if err != nil {
+		return a.writeClientError("auth.login", cfg.Format, err)
+	}
+
+	settingsScope := config.SettingsScope(scope)
+	if settingsScope != config.SettingsScopeHome && settingsScope != config.SettingsScopeProject {
+		return a.writeFailure(output.Failure{
+			Command: "auth.login",
+			Kind:    output.ErrorKindUsage,
+			Code:    "auth.login.scope",
+			Message: "invalid --scope, expected home or project",
+		}, cfg.Format)
+	}
+
+	path, err := config.WriteSettings(settingsScope, setupCfg, overwrite)
+	if err != nil {
+		return a.writeFailure(output.Failure{
+			Command: "auth.login",
+			Kind:    output.ErrorKindUsage,
+			Code:    "auth.login.write_failed",
+			Message: err.Error(),
+		}, cfg.Format)
+	}
+
+	return a.writeSuccess(output.Result{
+		Command: "auth.login",
+		Data: map[string]any{
+			"path":        path,
+			"scope":       scope,
+			"status_code": check.StatusCode,
+			"endpoint":    check.Endpoint,
+		},
+		Text: "auth saved to " + path,
+	}, cfg.Format)
+}
+
+func (a *App) prompt(label string) (string, error) {
+	if _, err := fmt.Fprint(a.stderr, label); err != nil {
+		return "", err
+	}
+
+	reader := bufio.NewReader(a.stdin)
+	value, err := reader.ReadString('\n')
+	if err != nil && err != io.EOF {
+		return "", err
+	}
+	return strings.TrimSpace(value), nil
 }
 
 func (a *App) writeSuccess(result output.Result, format string) int {
@@ -208,6 +356,7 @@ func (a *App) writeUsage(format string) int {
 		"",
 		"Commands:",
 		"  auth check      Validate connectivity and API credentials",
+		"  auth login      Persist API credentials to settings",
 		"  people search   Search people",
 		"  person get      Fetch one person by ID",
 		"  person create   Create one person",
@@ -259,4 +408,28 @@ func inferRequestedFormat(args []string) string {
 	}
 
 	return "json"
+}
+
+func defaultIsTTY() bool {
+	info, err := os.Stdin.Stat()
+	if err != nil {
+		return false
+	}
+	return (info.Mode() & os.ModeCharDevice) != 0
+}
+
+func errorCodeForConfigError(err error) string {
+	var settingsErr *config.SettingsError
+	if errors.As(err, &settingsErr) {
+		return "config.settings_invalid"
+	}
+	return "cli.parse"
+}
+
+func errorMessageForConfigError(err error) string {
+	var settingsErr *config.SettingsError
+	if errors.As(err, &settingsErr) {
+		return fmt.Sprintf("%s; repair it or run `twenty auth login --overwrite`", err.Error())
+	}
+	return err.Error()
 }

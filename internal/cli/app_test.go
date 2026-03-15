@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"net/url"
+	"strings"
 	"testing"
 
 	"github.com/jv/twenty-crm-cli/internal/client"
@@ -59,7 +60,7 @@ func TestAuthCheckJSONSuccess(t *testing.T) {
 	var stdout bytes.Buffer
 	var stderr bytes.Buffer
 
-	app := New(&stdout, &stderr)
+	app := New(strings.NewReader(""), &stdout, &stderr)
 	app.clientFactory = func(config.Config, client.HTTPDoer) twentyClient {
 		return clientStub{
 			result: client.AuthCheckResult{
@@ -87,7 +88,7 @@ func TestAuthCheckMissingAPIKey(t *testing.T) {
 	var stdout bytes.Buffer
 	var stderr bytes.Buffer
 
-	app := New(&stdout, &stderr)
+	app := New(strings.NewReader(""), &stdout, &stderr)
 
 	code := app.Run([]string{"auth", "check"})
 	if code != int(output.ExitAuth) {
@@ -107,7 +108,7 @@ func TestParseFailureReturnsJSONWhenRequested(t *testing.T) {
 	var stdout bytes.Buffer
 	var stderr bytes.Buffer
 
-	app := New(&stdout, &stderr)
+	app := New(strings.NewReader(""), &stdout, &stderr)
 
 	code := app.Run([]string{"--format", "json", "--wat"})
 	if code != int(output.ExitUsage) {
@@ -127,7 +128,7 @@ func TestConfigFailureReturnsJSONWhenRequested(t *testing.T) {
 	var stdout bytes.Buffer
 	var stderr bytes.Buffer
 
-	app := New(&stdout, &stderr)
+	app := New(strings.NewReader(""), &stdout, &stderr)
 
 	code := app.Run([]string{"--format", "yaml", "version"})
 	if code != int(output.ExitUsage) {
@@ -144,7 +145,7 @@ func TestAuthCheckForbiddenReturnsPermissionError(t *testing.T) {
 	var stdout bytes.Buffer
 	var stderr bytes.Buffer
 
-	app := New(&stdout, &stderr)
+	app := New(strings.NewReader(""), &stdout, &stderr)
 	app.clientFactory = func(config.Config, client.HTTPDoer) twentyClient {
 		return clientStub{
 			err: &client.APIError{
@@ -172,7 +173,7 @@ func TestAuthCheckUnauthorizedReturnsInvalidCredentials(t *testing.T) {
 	var stdout bytes.Buffer
 	var stderr bytes.Buffer
 
-	app := New(&stdout, &stderr)
+	app := New(strings.NewReader(""), &stdout, &stderr)
 	app.clientFactory = func(config.Config, client.HTTPDoer) twentyClient {
 		return clientStub{
 			err: &client.APIError{
@@ -200,7 +201,7 @@ func TestAuthCheckRequestFailureReturnsInternalError(t *testing.T) {
 	var stdout bytes.Buffer
 	var stderr bytes.Buffer
 
-	app := New(&stdout, &stderr)
+	app := New(strings.NewReader(""), &stdout, &stderr)
 	app.clientFactory = func(config.Config, client.HTTPDoer) twentyClient {
 		return clientStub{
 			err: errors.New("dial failed"),
@@ -225,7 +226,7 @@ func TestPersonGetSuccess(t *testing.T) {
 	var stdout bytes.Buffer
 	var stderr bytes.Buffer
 
-	app := New(&stdout, &stderr)
+	app := New(strings.NewReader(""), &stdout, &stderr)
 	app.clientFactory = func(config.Config, client.HTTPDoer) twentyClient {
 		return clientStub{
 			record: client.RecordResult{
@@ -249,7 +250,7 @@ func TestCompanySearchEmptyResultsReturnsArray(t *testing.T) {
 	var stdout bytes.Buffer
 	var stderr bytes.Buffer
 
-	app := New(&stdout, &stderr)
+	app := New(strings.NewReader(""), &stdout, &stderr)
 	app.clientFactory = func(config.Config, client.HTTPDoer) twentyClient {
 		return clientStub{
 			list: client.ListResult{
@@ -279,5 +280,76 @@ func TestCompanySearchEmptyResultsReturnsArray(t *testing.T) {
 	}
 	if len(envelope.Data) != 0 {
 		t.Fatalf("len(Data) = %d, want 0", len(envelope.Data))
+	}
+}
+
+func TestAuthLoginWritesHomeSettings(t *testing.T) {
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+
+	homeDir := t.TempDir()
+	t.Setenv("HOME", homeDir)
+
+	app := New(strings.NewReader(""), &stdout, &stderr)
+	app.isTTY = func() bool { return false }
+	app.clientFactory = func(config.Config, client.HTTPDoer) twentyClient {
+		return clientStub{
+			result: client.AuthCheckResult{
+				StatusCode: 200,
+				Endpoint:   "/metadata",
+			},
+		}
+	}
+
+	code := app.Run([]string{"auth", "login", "--api-key", "secret", "--base-url", "https://api.twenty.com"})
+	if code != int(output.ExitOK) {
+		t.Fatalf("Run() code = %d, want %d; stdout=%s stderr=%s", code, output.ExitOK, stdout.String(), stderr.String())
+	}
+
+	var envelope struct {
+		OK   bool `json:"ok"`
+		Data struct {
+			Path  string `json:"path"`
+			Scope string `json:"scope"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal(stdout.Bytes(), &envelope); err != nil {
+		t.Fatalf("json.Unmarshal() error = %v", err)
+	}
+	if !envelope.OK {
+		t.Fatalf("stdout = %s", stdout.String())
+	}
+	if envelope.Data.Scope != "home" {
+		t.Fatalf("scope = %q, want home", envelope.Data.Scope)
+	}
+	if !strings.HasSuffix(envelope.Data.Path, "/.twenty/settings") {
+		t.Fatalf("path = %q", envelope.Data.Path)
+	}
+}
+
+func TestAuthLoginPromptsOnTTY(t *testing.T) {
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+
+	homeDir := t.TempDir()
+	t.Setenv("HOME", homeDir)
+
+	app := New(strings.NewReader("secret\nhttps://api.twenty.com\n"), &stdout, &stderr)
+	app.isTTY = func() bool { return true }
+	app.clientFactory = func(config.Config, client.HTTPDoer) twentyClient {
+		return clientStub{
+			result: client.AuthCheckResult{
+				StatusCode: 200,
+				Endpoint:   "/metadata",
+			},
+		}
+	}
+
+	code := app.Run([]string{"auth", "login"})
+	if code != int(output.ExitOK) {
+		t.Fatalf("Run() code = %d, want %d; stdout=%s stderr=%s", code, output.ExitOK, stdout.String(), stderr.String())
+	}
+	if !strings.Contains(stderr.String(), "API key: ") {
+		t.Fatalf("stderr = %q, want prompt", stderr.String())
 	}
 }

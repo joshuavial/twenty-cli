@@ -3,6 +3,7 @@ package config
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/url"
 	"os"
 	"path/filepath"
@@ -17,12 +18,49 @@ type Config struct {
 	Format  string
 }
 
+type SettingsError struct {
+	Path string
+	Op   string
+	Err  error
+}
+
+func (e *SettingsError) Error() string {
+	return fmt.Sprintf("settings file %s at %s: %v", e.Op, e.Path, e.Err)
+}
+
+func (e *SettingsError) Unwrap() error {
+	return e.Err
+}
+
+type SettingsScope string
+
+const (
+	SettingsScopeHome    SettingsScope = "home"
+	SettingsScopeProject SettingsScope = "project"
+)
+
 func New(apiKey, baseURL, format string) (Config, error) {
 	settings, err := loadSettings()
 	if err != nil {
 		return Config{}, err
 	}
 
+	cfg := buildConfig(apiKey, baseURL, format, settings)
+	if err := cfg.Validate(); err != nil {
+		return Config{}, err
+	}
+	return cfg, nil
+}
+
+func NewWithoutSettings(apiKey, baseURL, format string) (Config, error) {
+	cfg := buildConfig(apiKey, baseURL, format, settings{})
+	if err := cfg.Validate(); err != nil {
+		return Config{}, err
+	}
+	return cfg, nil
+}
+
+func buildConfig(apiKey, baseURL, format string, settings settings) Config {
 	cfg := Config{
 		APIKey:  strings.TrimSpace(firstNonEmpty(apiKey, os.Getenv("TWENTY_API_KEY"), settings.APIKey)),
 		BaseURL: strings.TrimSpace(firstNonEmpty(baseURL, os.Getenv("TWENTY_BASE_URL"), settings.BaseURL, defaultBaseURL)),
@@ -34,15 +72,23 @@ func New(apiKey, baseURL, format string) (Config, error) {
 	}
 
 	if cfg.Format != "json" && cfg.Format != "text" {
-		return Config{}, errors.New("format must be one of: json, text")
+		cfg.Format = ""
 	}
 
-	parsed, err := url.ParseRequestURI(cfg.BaseURL)
+	return cfg
+}
+
+func (c Config) Validate() error {
+	if c.Format == "" {
+		return errors.New("format must be one of: json, text")
+	}
+
+	parsed, err := url.ParseRequestURI(c.BaseURL)
 	if err != nil || (parsed.Scheme != "http" && parsed.Scheme != "https") {
-		return Config{}, errors.New("base URL must be a valid http or https URL")
+		return errors.New("base URL must be a valid http or https URL")
 	}
 
-	return cfg, nil
+	return nil
 }
 
 func (c Config) ValidateAuth() error {
@@ -75,18 +121,74 @@ func loadSettings() (settings, error) {
 			continue
 		}
 		if err != nil {
-			return settings{}, err
+			return settings{}, &SettingsError{Path: path, Op: "read failed", Err: err}
 		}
 
 		var cfg settings
 		if err := json.Unmarshal(data, &cfg); err != nil {
-			return settings{}, err
+			return settings{}, &SettingsError{Path: path, Op: "is invalid", Err: err}
 		}
 
 		return cfg, nil
 	}
 
 	return settings{}, nil
+}
+
+func SettingsPath(scope SettingsScope) (string, error) {
+	switch scope {
+	case SettingsScopeProject:
+		wd, err := os.Getwd()
+		if err != nil {
+			return "", err
+		}
+		return filepath.Join(wd, ".twenty", "settings"), nil
+	case SettingsScopeHome:
+		homeDir, err := os.UserHomeDir()
+		if err != nil {
+			return "", err
+		}
+		return filepath.Join(homeDir, ".twenty", "settings"), nil
+	default:
+		return "", fmt.Errorf("unknown settings scope %q", scope)
+	}
+}
+
+func WriteSettings(scope SettingsScope, cfg Config, overwrite bool) (string, error) {
+	path, err := SettingsPath(scope)
+	if err != nil {
+		return "", err
+	}
+
+	if _, err := os.Stat(path); err == nil && !overwrite {
+		return "", &SettingsError{Path: path, Op: "already exists", Err: errors.New("use --overwrite to replace it")}
+	} else if err != nil && !errors.Is(err, os.ErrNotExist) {
+		return "", &SettingsError{Path: path, Op: "read failed", Err: err}
+	}
+
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		return "", &SettingsError{Path: path, Op: "mkdir failed", Err: err}
+	}
+
+	payload, err := json.MarshalIndent(settings{
+		APIKey:  strings.TrimSpace(cfg.APIKey),
+		BaseURL: strings.TrimSpace(cfg.BaseURL),
+	}, "", "  ")
+	if err != nil {
+		return "", err
+	}
+	payload = append(payload, '\n')
+
+	tempPath := path + ".tmp"
+	if err := os.WriteFile(tempPath, payload, 0o600); err != nil {
+		return "", &SettingsError{Path: tempPath, Op: "write failed", Err: err}
+	}
+	if err := os.Rename(tempPath, path); err != nil {
+		_ = os.Remove(tempPath)
+		return "", &SettingsError{Path: path, Op: "replace failed", Err: err}
+	}
+
+	return path, nil
 }
 
 func candidateSettingsPaths() []string {

@@ -1,6 +1,7 @@
 package config
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
 	"testing"
@@ -138,6 +139,92 @@ func TestValidateAuthRequiresAPIKey(t *testing.T) {
 
 	if err := cfg.ValidateAuth(); err == nil {
 		t.Fatal("ValidateAuth() expected error, got nil")
+	}
+}
+
+func TestWriteSettingsHomeScope(t *testing.T) {
+	homeDir := t.TempDir()
+	t.Setenv("HOME", homeDir)
+
+	path, err := WriteSettings(SettingsScopeHome, Config{
+		APIKey:  "secret",
+		BaseURL: "https://api.twenty.com",
+	}, false)
+	if err != nil {
+		t.Fatalf("WriteSettings() error = %v", err)
+	}
+
+	wantPath := filepath.Join(homeDir, ".twenty", "settings")
+	if path != wantPath {
+		t.Fatalf("path = %q, want %q", path, wantPath)
+	}
+
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("ReadFile() error = %v", err)
+	}
+	if string(data) != "{\n  \"api_key\": \"secret\",\n  \"base_url\": \"https://api.twenty.com\"\n}\n" {
+		t.Fatalf("settings = %q", string(data))
+	}
+}
+
+func TestWriteSettingsRefusesOverwriteByDefault(t *testing.T) {
+	homeDir := t.TempDir()
+	t.Setenv("HOME", homeDir)
+	writeSettings(t, filepath.Join(homeDir, ".twenty", "settings"), `{"api_key":"old","base_url":"https://old.example.com"}`)
+
+	_, err := WriteSettings(SettingsScopeHome, Config{
+		APIKey:  "secret",
+		BaseURL: "https://api.twenty.com",
+	}, false)
+	if err == nil {
+		t.Fatal("WriteSettings() expected error, got nil")
+	}
+
+	var settingsErr *SettingsError
+	if !errors.As(err, &settingsErr) {
+		t.Fatalf("err = %T, want *SettingsError", err)
+	}
+}
+
+func TestWriteSettingsOverwritesWhenRequested(t *testing.T) {
+	homeDir := t.TempDir()
+	t.Setenv("HOME", homeDir)
+	path := filepath.Join(homeDir, ".twenty", "settings")
+	writeSettings(t, path, `{"api_key":"old","base_url":"https://old.example.com"}`)
+
+	if _, err := WriteSettings(SettingsScopeHome, Config{
+		APIKey:  "secret",
+		BaseURL: "https://api.twenty.com",
+	}, true); err != nil {
+		t.Fatalf("WriteSettings() error = %v", err)
+	}
+
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("ReadFile() error = %v", err)
+	}
+	if string(data) != "{\n  \"api_key\": \"secret\",\n  \"base_url\": \"https://api.twenty.com\"\n}\n" {
+		t.Fatalf("settings = %q", string(data))
+	}
+}
+
+func TestNewReturnsSettingsErrorForInvalidSettingsFile(t *testing.T) {
+	homeDir := t.TempDir()
+	t.Setenv("HOME", homeDir)
+	writeSettings(t, filepath.Join(homeDir, ".twenty", "settings"), `{bad json`)
+
+	_, err := New("", "", "")
+	if err == nil {
+		t.Fatal("New() expected error, got nil")
+	}
+
+	var settingsErr *SettingsError
+	if !errors.As(err, &settingsErr) {
+		t.Fatalf("err = %T, want *SettingsError", err)
+	}
+	if settingsErr.Path == "" {
+		t.Fatal("settingsErr.Path = empty")
 	}
 }
 

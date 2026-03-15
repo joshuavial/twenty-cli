@@ -1,0 +1,10 @@
+{
+  "command": "auth.login",
+  "data": {
+    "endpoint": "/metadata",
+    "path": "\u003cHOME_SETTINGS_PATH\u003e",
+    "scope": "home",
+    "status_code": 200
+  },
+  "ok": true
+}

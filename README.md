@@ -6,6 +6,7 @@ Go CLI foundation for interacting with Twenty CRM using an LLM-friendly command 
 
 ```bash
 twenty auth check
+twenty auth login
 twenty people search
 twenty person get|create|update
 twenty companies search
@@ -69,6 +70,15 @@ Exit codes are stable across commands:
 
 ## Config
 
+The easiest first-time setup path is now:
+
+```bash
+twenty auth login --api-key "<your-api-key>" --base-url "https://api.twenty.com"
+twenty auth check
+```
+
+By default, `auth login` writes credentials to `~/.twenty/settings` so the CLI works from any directory.
+
 The CLI looks for credentials and base URL in this order:
 
 1. Command flags
@@ -88,6 +98,11 @@ Supported flags:
 - `--base-url`
 - `--format json|text`
 
+Auth setup flags:
+
+- `auth login --scope home|project`
+- `auth login --overwrite`
+
 Settings files are JSON. Example:
 
 ```json
@@ -98,6 +113,12 @@ Settings files are JSON. Example:
 ```
 
 The current working directory config overrides the home directory config.
+
+If a settings file is malformed, auth-dependent commands fail with a machine-readable error and tell you to repair the file or rerun:
+
+```bash
+twenty auth login --overwrite --api-key "<your-api-key>" --base-url "https://api.twenty.com"
+```
 
 ## Local Twenty dev server
 

@@ -1,0 +1,9 @@
+{
+  "command": "cli",
+  "error": {
+    "code": "config.settings_invalid",
+    "kind": "usage",
+    "message": "settings file is invalid at \u003cHOME_SETTINGS_PATH\u003e: invalid character 'b' looking for beginning of object key string; repair it or run `twenty auth login --overwrite`"
+  },
+  "ok": false
+}

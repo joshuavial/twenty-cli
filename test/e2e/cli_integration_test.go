@@ -4,6 +4,9 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -137,6 +140,65 @@ func TestAuthErrorInvalidCredentialsMatchesSnapshot(t *testing.T) {
 	}
 
 	harness.AssertJSONSnapshot("auth_error_invalid_credentials", result)
+}
+
+func TestAuthLoginWritesHomeSettingsAndMatchesSnapshot(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/metadata" {
+			http.NotFound(w, r)
+			return
+		}
+		if got := r.Header.Get("Authorization"); got != "Bearer env-secret" {
+			t.Fatalf("Authorization = %q, want Bearer env-secret", got)
+		}
+
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"data":{"__typename":"Query"}}`))
+	}))
+	defer server.Close()
+
+	harness := newHarness(t)
+	result := harness.Run(RunOptions{
+		Args: []string{"auth", "login", "--scope", "home"},
+		Env: map[string]string{
+			"TWENTY_API_KEY":  "env-secret",
+			"TWENTY_BASE_URL": server.URL,
+		},
+	})
+
+	if result.ExitCode != 0 {
+		t.Fatalf("ExitCode = %d, want 0; stdout=%s stderr=%s", result.ExitCode, result.Stdout, result.Stderr)
+	}
+
+	settingsPath := filepath.Join(result.HomeDir, ".twenty", "settings")
+	data, err := os.ReadFile(settingsPath)
+	if err != nil {
+		t.Fatalf("ReadFile(%s) error = %v", settingsPath, err)
+	}
+	if string(data) != "{\n  \"api_key\": \"env-secret\",\n  \"base_url\": \""+server.URL+"\"\n}\n" {
+		t.Fatalf("settings = %q", string(data))
+	}
+
+	result.Stdout = strings.ReplaceAll(result.Stdout, settingsPath, "<HOME_SETTINGS_PATH>")
+	harness.AssertJSONSnapshot("auth_login_home_success", result)
+}
+
+func TestInvalidSettingsFileMatchesSnapshot(t *testing.T) {
+	harness := newHarness(t)
+	result := harness.Run(RunOptions{
+		Args: []string{"auth", "check"},
+		HomeFiles: map[string]string{
+			".twenty/settings": `{bad json`,
+		},
+	})
+
+	if result.ExitCode != 2 {
+		t.Fatalf("ExitCode = %d, want 2; stdout=%s stderr=%s", result.ExitCode, result.Stdout, result.Stderr)
+	}
+
+	invalidPath := filepath.Join(result.HomeDir, ".twenty", "settings")
+	result.Stdout = strings.ReplaceAll(result.Stdout, invalidPath, "<HOME_SETTINGS_PATH>")
+	harness.AssertJSONSnapshot("config_error_invalid_settings", result)
 }
 
 func TestPeopleSearchMatchesSnapshot(t *testing.T) {

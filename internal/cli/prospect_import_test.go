@@ -65,7 +65,7 @@ func TestProspectImportReusesSameBatchCompany(t *testing.T) {
 	}
 
 	stub := &importClientStub{}
-	app := New(&stdout, &stderr)
+	app := New(bytes.NewReader(nil), &stdout, &stderr)
 	app.clientFactory = func(config.Config, client.HTTPDoer) twentyClient {
 		return stub
 	}
