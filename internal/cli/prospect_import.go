@@ -82,8 +82,9 @@ func (a *App) runProspectImport(cfg config.Config, args []string) int {
 		}
 
 		companyID := ""
+		companyAction := ""
 		if record.Company != "" || record.CompanyDomain != "" {
-			companyID, err = ensureCompany(cli, record, lookupFirst, dryRun)
+			companyAction, companyID, err = ensureCompany(cli, record, lookupFirst, dryRun)
 			if err != nil {
 				summary.Failed++
 				item["status"] = "failed"
@@ -93,9 +94,9 @@ func (a *App) runProspectImport(cfg config.Config, args []string) int {
 			}
 			if companyID != "" {
 				item["company_id"] = companyID
-				if dryRun {
-					item["company_action"] = "planned"
-				}
+			}
+			if companyAction != "" {
+				item["company_action"] = companyAction
 			}
 		}
 
@@ -115,15 +116,13 @@ func (a *App) runProspectImport(cfg config.Config, args []string) int {
 			summary.SkippedPeople++
 		case "planned":
 		}
-		if record.Company != "" || record.CompanyDomain != "" {
-			switch {
-			case dryRun && companyID == "":
-				summary.CreatedCompanies++
-			case companyID != "" && lookupFirst:
-				summary.SkippedCompanies++
-			case companyID != "":
-				summary.CreatedCompanies++
-			}
+		switch companyAction {
+		case "created":
+			summary.CreatedCompanies++
+		case "skipped":
+			summary.SkippedCompanies++
+		case "planned":
+			summary.CreatedCompanies++
 		}
 		item["status"] = personAction
 		item["person_id"] = personID
@@ -178,7 +177,7 @@ func loadProspects(path string) ([]prospectRecord, error) {
 	return records, scanner.Err()
 }
 
-func ensureCompany(cli twentyClient, record prospectRecord, lookupFirst, dryRun bool) (string, error) {
+func ensureCompany(cli twentyClient, record prospectRecord, lookupFirst, dryRun bool) (string, string, error) {
 	query := strings.TrimSpace(record.Company)
 	if query == "" {
 		query = strings.TrimSpace(record.CompanyDomain)
@@ -186,15 +185,15 @@ func ensureCompany(cli twentyClient, record prospectRecord, lookupFirst, dryRun 
 	if lookupFirst && query != "" {
 		result, err := searchEntityRecords(cli, entityDefs[1], defaultSearchValues(10), query)
 		if err != nil {
-			return "", err
+			return "", "", err
 		}
 		if len(result.Records) > 0 {
 			id, _ := result.Records[0]["id"].(string)
-			return id, nil
+			return "skipped", id, nil
 		}
 	}
 	if dryRun {
-		return "", nil
+		return "planned", "", nil
 	}
 
 	payload := map[string]any{}
@@ -209,10 +208,10 @@ func ensureCompany(cli twentyClient, record prospectRecord, lookupFirst, dryRun 
 	}
 	created, err := cli.CreateRecord(context.Background(), "companies", "createCompany", payload)
 	if err != nil {
-		return "", err
+		return "", "", err
 	}
 	id, _ := created.Record["id"].(string)
-	return id, nil
+	return "created", id, nil
 }
 
 func ensurePerson(cli twentyClient, record prospectRecord, companyID string, lookupFirst, dryRun bool) (string, string, error) {
@@ -265,7 +264,7 @@ func ensurePerson(cli twentyClient, record prospectRecord, companyID string, loo
 
 func defaultSearchValues(limit int) map[string][]string {
 	return map[string][]string{
-		"limit": {"10"},
+		"limit": {fmt.Sprintf("%d", limit)},
 		"depth": {"0"},
 	}
 }
