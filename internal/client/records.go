@@ -3,6 +3,7 @@ package client
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
 	"net/url"
@@ -144,7 +145,12 @@ func decodeRecordBody(r io.Reader, key string) (map[string]any, error) {
 		return nil, err
 	}
 
-	return payload.Data[key], nil
+	record, ok := payload.Data[key]
+	if !ok {
+		return nil, fmt.Errorf("response missing expected key %q in data", key)
+	}
+
+	return record, nil
 }
 
 func ensureHTTPSuccess(resp *http.Response) error {

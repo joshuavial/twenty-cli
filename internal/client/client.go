@@ -213,8 +213,9 @@ query CLIObjectMetadataItems {
 	}
 	if len(result.Errors) > 0 {
 		payload, _ := json.Marshal(result.Errors)
+		statusCode := statusCodeForGraphQLErrors(result.Errors, resp.StatusCode)
 		return nil, &APIError{
-			StatusCode: resp.StatusCode,
+			StatusCode: statusCode,
 			Body:       string(payload),
 		}
 	}

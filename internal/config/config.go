@@ -37,8 +37,9 @@ func New(apiKey, baseURL, format string) (Config, error) {
 		return Config{}, errors.New("format must be one of: json, text")
 	}
 
-	if _, err := url.ParseRequestURI(cfg.BaseURL); err != nil {
-		return Config{}, errors.New("base URL must be a valid absolute URL")
+	parsed, err := url.ParseRequestURI(cfg.BaseURL)
+	if err != nil || (parsed.Scheme != "http" && parsed.Scheme != "https") {
+		return Config{}, errors.New("base URL must be a valid http or https URL")
 	}
 
 	return cfg, nil

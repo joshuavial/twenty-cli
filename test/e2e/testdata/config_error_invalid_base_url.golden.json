@@ -3,7 +3,7 @@
   "error": {
     "code": "cli.parse",
     "kind": "usage",
-    "message": "base URL must be a valid absolute URL"
+    "message": "base URL must be a valid http or https URL"
   },
   "ok": false
 }

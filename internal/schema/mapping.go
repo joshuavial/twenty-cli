@@ -160,10 +160,10 @@ func matchFields(fields []Field, fieldName string) []Field {
 	return matches
 }
 
+var normalizeReplacer = strings.NewReplacer("-", "", "_", "", " ", "")
+
 func normalizeKey(value string) string {
-	value = strings.TrimSpace(strings.ToLower(value))
-	replacer := strings.NewReplacer("-", "", "_", "", " ", "")
-	return replacer.Replace(value)
+	return normalizeReplacer.Replace(strings.TrimSpace(strings.ToLower(value)))
 }
 
 func joinNames(names []string) string {

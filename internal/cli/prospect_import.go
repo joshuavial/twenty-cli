@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"flag"
 	"fmt"
+	"io"
 	"os"
 	"strings"
 
@@ -36,7 +37,7 @@ type prospectImportSummary struct {
 
 func (a *App) runProspectImport(cfg config.Config, args []string) int {
 	fs := flag.NewFlagSet("prospect.import", flag.ContinueOnError)
-	fs.SetOutput(ioDiscard{})
+	fs.SetOutput(io.Discard)
 
 	var file string
 	var lookupFirst bool
@@ -84,11 +85,12 @@ func (a *App) runProspectImport(cfg config.Config, args []string) int {
 		companyID := ""
 		companyAction := ""
 		if record.Company != "" || record.CompanyDomain != "" {
-			companyAction, companyID, err = ensureCompany(cli, record, lookupFirst, dryRun)
-			if err != nil {
+			var companyErr error
+			companyAction, companyID, companyErr = ensureCompany(cli, record, lookupFirst, dryRun)
+			if companyErr != nil {
 				summary.Failed++
 				item["status"] = "failed"
-				item["error"] = err.Error()
+				item["error"] = companyErr.Error()
 				summary.Results = append(summary.Results, item)
 				continue
 			}

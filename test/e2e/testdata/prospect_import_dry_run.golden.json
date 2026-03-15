@@ -9,6 +9,7 @@
     "results": [
       {
         "company": "Analytical Engines",
+        "company_action": "planned",
         "email": "ada@example.com",
         "person_id": "",
         "status": "planned"

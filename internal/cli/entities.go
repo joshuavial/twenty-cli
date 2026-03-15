@@ -4,6 +4,7 @@ import (
 	"context"
 	"flag"
 	"fmt"
+	"io"
 	"net/http"
 	"net/url"
 	"slices"
@@ -119,7 +120,7 @@ func (a *App) runEntity(cfg config.Config, token string, args []string) int {
 
 func (a *App) runEntitySearch(cli twentyClient, cfg config.Config, entity entityDef, args []string) int {
 	fs := flag.NewFlagSet(entity.pluralCmd, flag.ContinueOnError)
-	fs.SetOutput(ioDiscard{})
+	fs.SetOutput(io.Discard)
 
 	var query string
 	var limit int
@@ -187,7 +188,7 @@ func (a *App) runEntitySearch(cli twentyClient, cfg config.Config, entity entity
 
 func (a *App) runEntityGet(cli twentyClient, cfg config.Config, entity entityDef, args []string) int {
 	fs := flag.NewFlagSet(entity.singularCmd, flag.ContinueOnError)
-	fs.SetOutput(ioDiscard{})
+	fs.SetOutput(io.Discard)
 
 	var id string
 	var depth int
@@ -297,10 +298,6 @@ func (a *App) writeClientError(command, format string, err error) int {
 	}, format)
 }
 
-type ioDiscard struct{}
-
-func (ioDiscard) Write(p []byte) (int, error) { return len(p), nil }
-
 func searchEntityRecords(cli twentyClient, entity entityDef, baseQuery url.Values, query string) (client.ListResult, error) {
 	if query == "" {
 		return cli.ListRecords(context.Background(), entity.pluralRoute, baseQuery)
@@ -308,8 +305,6 @@ func searchEntityRecords(cli twentyClient, entity entityDef, baseQuery url.Value
 
 	filters := filtersForEntityQuery(entity, query)
 	var combined []map[string]any
-	var pageInfo client.PageInfo
-	totalCount := 0
 	seen := map[string]struct{}{}
 
 	for _, filter := range filters {
@@ -319,11 +314,6 @@ func searchEntityRecords(cli twentyClient, entity entityDef, baseQuery url.Value
 		result, err := cli.ListRecords(context.Background(), entity.pluralRoute, queryValues)
 		if err != nil {
 			return client.ListResult{}, err
-		}
-
-		if totalCount == 0 {
-			totalCount = result.TotalCount
-			pageInfo = result.PageInfo
 		}
 
 		for _, record := range result.Records {
@@ -343,7 +333,6 @@ func searchEntityRecords(cli twentyClient, entity entityDef, baseQuery url.Value
 	return client.ListResult{
 		Records:    combined,
 		TotalCount: len(combined),
-		PageInfo:   pageInfo,
 	}, nil
 }
 
@@ -383,7 +372,7 @@ func cloneValues(values url.Values) url.Values {
 
 func parseEntityMutation(entity entityDef, action string, args []string) (map[string]any, output.Failure, bool) {
 	fs := flag.NewFlagSet(entity.singularCmd, flag.ContinueOnError)
-	fs.SetOutput(ioDiscard{})
+	fs.SetOutput(io.Discard)
 
 	var id string
 	var firstName string

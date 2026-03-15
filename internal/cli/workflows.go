@@ -4,6 +4,7 @@ import (
 	"context"
 	"flag"
 	"fmt"
+	"io"
 	"os"
 	"strings"
 	"time"
@@ -154,7 +155,6 @@ func (a *App) executeActivityWorkflow(cfg config.Config, command string, spec ac
 		for _, nextStep := range spec.nextSteps {
 			task, err := createLinkedTask(cli, taskSpec{
 				Title:   nextStep,
-				Markdown: spec.markdown,
 				Status:  "TODO",
 				Targets: spec.targets,
 			})
@@ -195,7 +195,7 @@ func (a *App) executeActivityWorkflow(cfg config.Config, command string, spec ac
 
 func parseNoteArgs(command string, args []string) (string, string, linkedTargetIDs, output.Failure, bool) {
 	fs := flag.NewFlagSet(command, flag.ContinueOnError)
-	fs.SetOutput(ioDiscard{})
+	fs.SetOutput(io.Discard)
 
 	var title string
 	var body string
@@ -237,7 +237,7 @@ type taskSpec struct {
 
 func parseTaskArgs(command string, args []string) (taskSpec, output.Failure, bool) {
 	fs := flag.NewFlagSet(command, flag.ContinueOnError)
-	fs.SetOutput(ioDiscard{})
+	fs.SetOutput(io.Discard)
 
 	var spec taskSpec
 	var bodyFile string
@@ -273,7 +273,7 @@ func parseTaskArgs(command string, args []string) (taskSpec, output.Failure, boo
 
 func parseWorkflowLogArgs(command, defaultTitle string, args []string) (activityWorkflowSpec, output.Failure, bool) {
 	fs := flag.NewFlagSet(command, flag.ContinueOnError)
-	fs.SetOutput(ioDiscard{})
+	fs.SetOutput(io.Discard)
 
 	var spec activityWorkflowSpec
 	var bodyFile string
