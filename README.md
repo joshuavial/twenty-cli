@@ -6,6 +6,17 @@ Go CLI foundation for interacting with Twenty CRM using an LLM-friendly command 
 
 ```bash
 twenty auth check
+twenty people search
+twenty person get|create|update
+twenty companies search
+twenty company get|create|update
+twenty deals search
+twenty deal get|create|update
+twenty note add
+twenty task create
+twenty meeting log
+twenty call capture
+twenty prospect import
 twenty version
 ```
 
@@ -19,7 +30,7 @@ JSON is the primary machine-readable mode. Every command emits a stable envelope
   "command": "auth.check",
   "data": {
     "status_code": 200,
-    "endpoint": "/rest/metadata"
+    "endpoint": "/metadata"
   }
 }
 ```

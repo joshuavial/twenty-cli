@@ -1,7 +1,7 @@
 {
   "command": "prospect.import",
   "data": {
-    "created_companies": 1,
+    "created_companies": 0,
     "created_people": 0,
     "dry_run": true,
     "failed": 0,

@@ -35,6 +35,11 @@ type prospectImportSummary struct {
 	Results          []map[string]any   `json:"results,omitempty"`
 }
 
+type companyImportState struct {
+	ID     string
+	Action string
+}
+
 func (a *App) runProspectImport(cfg config.Config, args []string) int {
 	fs := flag.NewFlagSet("prospect.import", flag.ContinueOnError)
 	fs.SetOutput(io.Discard)
@@ -75,6 +80,7 @@ func (a *App) runProspectImport(cfg config.Config, args []string) int {
 
 	cli := a.clientFactory(cfg, a.httpClient)
 	summary := prospectImportSummary{DryRun: dryRun}
+	companyCache := map[string]companyImportState{}
 	for _, record := range records {
 		summary.Processed++
 		item := map[string]any{
@@ -86,7 +92,7 @@ func (a *App) runProspectImport(cfg config.Config, args []string) int {
 		companyAction := ""
 		if record.Company != "" || record.CompanyDomain != "" {
 			var companyErr error
-			companyAction, companyID, companyErr = ensureCompany(cli, record, lookupFirst, dryRun)
+			companyAction, companyID, companyErr = ensureCompany(cli, companyCache, record, lookupFirst, dryRun)
 			if companyErr != nil {
 				summary.Failed++
 				item["status"] = "failed"
@@ -123,8 +129,6 @@ func (a *App) runProspectImport(cfg config.Config, args []string) int {
 			summary.CreatedCompanies++
 		case "skipped":
 			summary.SkippedCompanies++
-		case "planned":
-			summary.CreatedCompanies++
 		}
 		item["status"] = personAction
 		item["person_id"] = personID
@@ -179,7 +183,17 @@ func loadProspects(path string) ([]prospectRecord, error) {
 	return records, scanner.Err()
 }
 
-func ensureCompany(cli twentyClient, record prospectRecord, lookupFirst, dryRun bool) (string, string, error) {
+func ensureCompany(cli twentyClient, cache map[string]companyImportState, record prospectRecord, lookupFirst, dryRun bool) (string, string, error) {
+	cacheKey := companyCacheKey(record)
+	if cacheKey != "" {
+		if state, ok := cache[cacheKey]; ok {
+			if state.Action == "created" {
+				return "reused", state.ID, nil
+			}
+			return state.Action, state.ID, nil
+		}
+	}
+
 	query := strings.TrimSpace(record.Company)
 	if query == "" {
 		query = strings.TrimSpace(record.CompanyDomain)
@@ -191,10 +205,16 @@ func ensureCompany(cli twentyClient, record prospectRecord, lookupFirst, dryRun 
 		}
 		if len(result.Records) > 0 {
 			id, _ := result.Records[0]["id"].(string)
+			if cacheKey != "" {
+				cache[cacheKey] = companyImportState{ID: id, Action: "skipped"}
+			}
 			return "skipped", id, nil
 		}
 	}
 	if dryRun {
+		if cacheKey != "" {
+			cache[cacheKey] = companyImportState{Action: "planned"}
+		}
 		return "planned", "", nil
 	}
 
@@ -213,6 +233,9 @@ func ensureCompany(cli twentyClient, record prospectRecord, lookupFirst, dryRun 
 		return "", "", err
 	}
 	id, _ := created.Record["id"].(string)
+	if cacheKey != "" {
+		cache[cacheKey] = companyImportState{ID: id, Action: "created"}
+	}
 	return "created", id, nil
 }
 
@@ -269,4 +292,13 @@ func defaultSearchValues(limit int) map[string][]string {
 		"limit": {fmt.Sprintf("%d", limit)},
 		"depth": {"0"},
 	}
+}
+
+func companyCacheKey(record prospectRecord) string {
+	company := strings.ToLower(strings.TrimSpace(record.Company))
+	domain := strings.ToLower(strings.TrimSpace(record.CompanyDomain))
+	if company == "" && domain == "" {
+		return ""
+	}
+	return company + "|" + domain
 }

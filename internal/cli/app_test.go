@@ -244,3 +244,40 @@ func TestPersonGetSuccess(t *testing.T) {
 		t.Fatalf("stdout = %s", stdout.String())
 	}
 }
+
+func TestCompanySearchEmptyResultsReturnsArray(t *testing.T) {
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+
+	app := New(&stdout, &stderr)
+	app.clientFactory = func(config.Config, client.HTTPDoer) twentyClient {
+		return clientStub{
+			list: client.ListResult{
+				Records: nil,
+			},
+		}
+	}
+
+	code := app.Run([]string{"--api-key", "secret", "companies", "search", "--query", "missing"})
+	if code != int(output.ExitOK) {
+		t.Fatalf("Run() code = %d, want %d", code, output.ExitOK)
+	}
+
+	var envelope struct {
+		OK      bool                     `json:"ok"`
+		Command string                   `json:"command"`
+		Data    []map[string]any         `json:"data"`
+	}
+	if err := json.Unmarshal(stdout.Bytes(), &envelope); err != nil {
+		t.Fatalf("json.Unmarshal() error = %v", err)
+	}
+	if !envelope.OK || envelope.Command != "companies.search" {
+		t.Fatalf("stdout = %s", stdout.String())
+	}
+	if envelope.Data == nil {
+		t.Fatalf("Data = nil, want empty array")
+	}
+	if len(envelope.Data) != 0 {
+		t.Fatalf("len(Data) = %d, want 0", len(envelope.Data))
+	}
+}

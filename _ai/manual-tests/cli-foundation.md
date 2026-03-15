@@ -98,9 +98,12 @@ Manual verification of the current implemented surface:
 - None
 
 ## Steps
-1. Temporarily move `./.twenty/settings` out of the way or run from a temp directory without local settings
-2. Ensure `TWENTY_API_KEY` is unset
-3. Run `go run ./cmd/twenty auth check`
+1. Build a disposable binary:
+   `go build -o /tmp/twenty-manual ./cmd/twenty`
+2. Run from a temp directory without local settings, for example:
+   `cd "$(mktemp -d)"`
+3. Ensure `TWENTY_API_KEY` is unset
+4. Run `/tmp/twenty-manual auth check`
 
 ## Expected Results
 - Command exits non-zero

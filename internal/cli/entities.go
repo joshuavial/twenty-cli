@@ -166,6 +166,9 @@ func (a *App) runEntitySearch(cli twentyClient, cfg config.Config, entity entity
 	}
 
 	records := results.Records
+	if records == nil {
+		records = []map[string]any{}
+	}
 	if limit > 0 && len(records) > limit {
 		records = records[:limit]
 	}
