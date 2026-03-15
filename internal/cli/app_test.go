@@ -5,7 +5,10 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"io"
 	"net/url"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -291,7 +294,7 @@ func TestAuthLoginWritesHomeSettings(t *testing.T) {
 	t.Setenv("HOME", homeDir)
 
 	app := New(strings.NewReader(""), &stdout, &stderr)
-	app.isTTY = func() bool { return false }
+	app.isTTY = func(io.Reader) bool { return false }
 	app.clientFactory = func(config.Config, client.HTTPDoer) twentyClient {
 		return clientStub{
 			result: client.AuthCheckResult{
@@ -335,7 +338,7 @@ func TestAuthLoginPromptsOnTTY(t *testing.T) {
 	t.Setenv("HOME", homeDir)
 
 	app := New(strings.NewReader("secret\nhttps://api.twenty.com\n"), &stdout, &stderr)
-	app.isTTY = func() bool { return true }
+	app.isTTY = func(io.Reader) bool { return true }
 	app.clientFactory = func(config.Config, client.HTTPDoer) twentyClient {
 		return clientStub{
 			result: client.AuthCheckResult{
@@ -351,5 +354,69 @@ func TestAuthLoginPromptsOnTTY(t *testing.T) {
 	}
 	if !strings.Contains(stderr.String(), "API key: ") {
 		t.Fatalf("stderr = %q, want prompt", stderr.String())
+	}
+}
+
+func TestAuthLoginProjectScopeWritesProjectSettings(t *testing.T) {
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+
+	homeDir := t.TempDir()
+	workDir := t.TempDir()
+	t.Setenv("HOME", homeDir)
+
+	previousWD, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("Getwd() error = %v", err)
+	}
+	defer func() { _ = os.Chdir(previousWD) }()
+	if err := os.Chdir(workDir); err != nil {
+		t.Fatalf("Chdir() error = %v", err)
+	}
+
+	app := New(strings.NewReader(""), &stdout, &stderr)
+	app.isTTY = func(io.Reader) bool { return false }
+	app.clientFactory = func(config.Config, client.HTTPDoer) twentyClient {
+		return clientStub{result: client.AuthCheckResult{StatusCode: 200, Endpoint: "/metadata"}}
+	}
+
+	code := app.Run([]string{"auth", "login", "--api-key", "secret", "--base-url", "https://api.twenty.com", "--scope", "project"})
+	if code != int(output.ExitOK) {
+		t.Fatalf("Run() code = %d, want %d; stdout=%s stderr=%s", code, output.ExitOK, stdout.String(), stderr.String())
+	}
+
+	path := filepath.Join(workDir, ".twenty", "settings")
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("ReadFile() error = %v", err)
+	}
+	if string(data) != "{\n  \"api_key\": \"secret\",\n  \"base_url\": \"https://api.twenty.com\"\n}\n" {
+		t.Fatalf("settings = %q", string(data))
+	}
+}
+
+func TestAuthLoginInvalidScopeFailsBeforeAuthCheck(t *testing.T) {
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+
+	app := New(strings.NewReader(""), &stdout, &stderr)
+	app.isTTY = func(io.Reader) bool { return false }
+	called := false
+	app.clientFactory = func(config.Config, client.HTTPDoer) twentyClient {
+		called = true
+		return clientStub{result: client.AuthCheckResult{StatusCode: 200, Endpoint: "/metadata"}}
+	}
+
+	code := app.Run([]string{"auth", "login", "--api-key", "secret", "--base-url", "https://api.twenty.com", "--scope", "bad"})
+	if code != int(output.ExitUsage) {
+		t.Fatalf("Run() code = %d, want %d; stdout=%s stderr=%s", code, output.ExitUsage, stdout.String(), stderr.String())
+	}
+	if called {
+		t.Fatal("clientFactory called, want scope validation before auth check")
+	}
+
+	envelope := decodeEnvelope(t, stdout.String())
+	if envelope.Error == nil || envelope.Error.Code != "auth.login.scope" {
+		t.Fatalf("stdout = %s", stdout.String())
 	}
 }

@@ -183,6 +183,64 @@ func TestAuthLoginWritesHomeSettingsAndMatchesSnapshot(t *testing.T) {
 	harness.AssertJSONSnapshot("auth_login_home_success", result)
 }
 
+func TestAuthLoginWritesProjectSettingsAndMatchesSnapshot(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/metadata" {
+			http.NotFound(w, r)
+			return
+		}
+		if got := r.Header.Get("Authorization"); got != "Bearer env-secret" {
+			t.Fatalf("Authorization = %q, want Bearer env-secret", got)
+		}
+
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"data":{"__typename":"Query"}}`))
+	}))
+	defer server.Close()
+
+	harness := newHarness(t)
+	result := harness.Run(RunOptions{
+		Args: []string{"auth", "login", "--scope", "project"},
+		Env: map[string]string{
+			"TWENTY_API_KEY":  "env-secret",
+			"TWENTY_BASE_URL": server.URL,
+		},
+	})
+
+	if result.ExitCode != 0 {
+		t.Fatalf("ExitCode = %d, want 0; stdout=%s stderr=%s", result.ExitCode, result.Stdout, result.Stderr)
+	}
+
+	settingsPath := filepath.Join(result.WorkDir, ".twenty", "settings")
+	data, err := os.ReadFile(settingsPath)
+	if err != nil {
+		t.Fatalf("ReadFile(%s) error = %v", settingsPath, err)
+	}
+	if string(data) != "{\n  \"api_key\": \"env-secret\",\n  \"base_url\": \""+server.URL+"\"\n}\n" {
+		t.Fatalf("settings = %q", string(data))
+	}
+
+	result.Stdout = strings.ReplaceAll(result.Stdout, settingsPath, "<PROJECT_SETTINGS_PATH>")
+	harness.AssertJSONSnapshot("auth_login_project_success", result)
+}
+
+func TestAuthLoginInvalidScopeMatchesSnapshot(t *testing.T) {
+	harness := newHarness(t)
+	result := harness.Run(RunOptions{
+		Args: []string{"auth", "login", "--scope", "bad"},
+		Env: map[string]string{
+			"TWENTY_API_KEY":  "env-secret",
+			"TWENTY_BASE_URL": "https://api.twenty.com",
+		},
+	})
+
+	if result.ExitCode != 2 {
+		t.Fatalf("ExitCode = %d, want 2; stdout=%s stderr=%s", result.ExitCode, result.Stdout, result.Stderr)
+	}
+
+	harness.AssertJSONSnapshot("auth_login_invalid_scope", result)
+}
+
 func TestInvalidSettingsFileMatchesSnapshot(t *testing.T) {
 	harness := newHarness(t)
 	result := harness.Run(RunOptions{

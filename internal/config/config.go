@@ -179,9 +179,19 @@ func WriteSettings(scope SettingsScope, cfg Config, overwrite bool) (string, err
 	}
 	payload = append(payload, '\n')
 
-	tempPath := path + ".tmp"
-	if err := os.WriteFile(tempPath, payload, 0o600); err != nil {
+	tempFile, err := os.CreateTemp(filepath.Dir(path), "settings-*.tmp")
+	if err != nil {
+		return "", &SettingsError{Path: path, Op: "tempfile create failed", Err: err}
+	}
+	tempPath := tempFile.Name()
+	if _, err := tempFile.Write(payload); err != nil {
+		_ = tempFile.Close()
+		_ = os.Remove(tempPath)
 		return "", &SettingsError{Path: tempPath, Op: "write failed", Err: err}
+	}
+	if err := tempFile.Close(); err != nil {
+		_ = os.Remove(tempPath)
+		return "", &SettingsError{Path: tempPath, Op: "close failed", Err: err}
 	}
 	if err := os.Rename(tempPath, path); err != nil {
 		_ = os.Remove(tempPath)

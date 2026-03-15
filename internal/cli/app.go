@@ -14,6 +14,7 @@ import (
 	"github.com/jv/twenty-crm-cli/internal/client"
 	"github.com/jv/twenty-crm-cli/internal/config"
 	"github.com/jv/twenty-crm-cli/internal/output"
+	"golang.org/x/term"
 )
 
 type App struct {
@@ -22,7 +23,8 @@ type App struct {
 	stderr        io.Writer
 	httpClient    client.HTTPDoer
 	clientFactory func(config.Config, client.HTTPDoer) twentyClient
-	isTTY         func() bool
+	isTTY         func(io.Reader) bool
+	promptReader  *bufio.Reader
 }
 
 func New(stdin io.Reader, stdout, stderr io.Writer) *App {
@@ -213,9 +215,19 @@ func (a *App) runAuthLogin(cfg config.Config, args []string) int {
 
 	apiKey = strings.TrimSpace(apiKey)
 	baseURL = strings.TrimSpace(baseURL)
-	if a.isTTY() {
+	settingsScope := config.SettingsScope(scope)
+	if settingsScope != config.SettingsScopeHome && settingsScope != config.SettingsScopeProject {
+		return a.writeFailure(output.Failure{
+			Command: "auth.login",
+			Kind:    output.ErrorKindUsage,
+			Code:    "auth.login.scope",
+			Message: "invalid --scope, expected home or project",
+		}, cfg.Format)
+	}
+
+	if a.isTTY(a.stdin) {
 		if apiKey == "" {
-			value, err := a.prompt("API key: ")
+			value, err := a.promptSecret("API key: ")
 			if err != nil {
 				return a.writeFailure(output.Failure{
 					Command:   "auth.login",
@@ -268,16 +280,6 @@ func (a *App) runAuthLogin(cfg config.Config, args []string) int {
 		return a.writeClientError("auth.login", cfg.Format, err)
 	}
 
-	settingsScope := config.SettingsScope(scope)
-	if settingsScope != config.SettingsScopeHome && settingsScope != config.SettingsScopeProject {
-		return a.writeFailure(output.Failure{
-			Command: "auth.login",
-			Kind:    output.ErrorKindUsage,
-			Code:    "auth.login.scope",
-			Message: "invalid --scope, expected home or project",
-		}, cfg.Format)
-	}
-
 	path, err := config.WriteSettings(settingsScope, setupCfg, overwrite)
 	if err != nil {
 		return a.writeFailure(output.Failure{
@@ -305,12 +307,38 @@ func (a *App) prompt(label string) (string, error) {
 		return "", err
 	}
 
-	reader := bufio.NewReader(a.stdin)
-	value, err := reader.ReadString('\n')
+	value, err := a.reader().ReadString('\n')
 	if err != nil && err != io.EOF {
 		return "", err
 	}
 	return strings.TrimSpace(value), nil
+}
+
+func (a *App) promptSecret(label string) (string, error) {
+	if _, err := fmt.Fprint(a.stderr, label); err != nil {
+		return "", err
+	}
+
+	file, ok := a.stdin.(*os.File)
+	if ok && term.IsTerminal(int(file.Fd())) {
+		value, err := term.ReadPassword(int(file.Fd()))
+		if _, writeErr := fmt.Fprintln(a.stderr); writeErr != nil && err == nil {
+			err = writeErr
+		}
+		if err != nil {
+			return "", err
+		}
+		return strings.TrimSpace(string(value)), nil
+	}
+
+	return a.prompt("")
+}
+
+func (a *App) reader() *bufio.Reader {
+	if a.promptReader == nil {
+		a.promptReader = bufio.NewReader(a.stdin)
+	}
+	return a.promptReader
 }
 
 func (a *App) writeSuccess(result output.Result, format string) int {
@@ -410,8 +438,12 @@ func inferRequestedFormat(args []string) string {
 	return "json"
 }
 
-func defaultIsTTY() bool {
-	info, err := os.Stdin.Stat()
+func defaultIsTTY(r io.Reader) bool {
+	file, ok := r.(*os.File)
+	if !ok {
+		return false
+	}
+	info, err := file.Stat()
 	if err != nil {
 		return false
 	}

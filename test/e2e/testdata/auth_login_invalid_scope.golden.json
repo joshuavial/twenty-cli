@@ -1,0 +1,9 @@
+{
+  "command": "auth.login",
+  "error": {
+    "code": "auth.login.scope",
+    "kind": "usage",
+    "message": "invalid --scope, expected home or project"
+  },
+  "ok": false
+}

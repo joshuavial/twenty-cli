@@ -1,0 +1,10 @@
+{
+  "command": "auth.login",
+  "data": {
+    "endpoint": "/metadata",
+    "path": "/private\u003cPROJECT_SETTINGS_PATH\u003e",
+    "scope": "project",
+    "status_code": 200
+  },
+  "ok": true
+}
