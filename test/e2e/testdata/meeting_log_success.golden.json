@@ -1,0 +1,20 @@
+{
+  "command": "meeting.log",
+  "data": {
+    "note": {
+      "bodyV2": {
+        "markdown": "met and aligned"
+      },
+      "id": "note_123",
+      "title": "Meeting"
+    },
+    "tasks": [
+      {
+        "id": "task_123",
+        "status": "TODO",
+        "title": "Send proposal"
+      }
+    ]
+  },
+  "ok": true
+}

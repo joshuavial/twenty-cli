@@ -57,6 +57,8 @@ func (a *App) Run(args []string) int {
 		}, cfg.Format)
 	case "person", "people", "contact", "contacts", "company", "companies", "deal", "deals", "opportunity", "opportunities":
 		return a.runEntity(cfg, remaining[0], remaining[1:])
+	case "note", "task", "meeting", "call", "prospect":
+		return a.runWorkflow(cfg, remaining[0], remaining[1:])
 	default:
 		return a.writeFailure(output.Failure{
 			Command: "cli",
@@ -218,6 +220,11 @@ func (a *App) writeUsage(format string) int {
 		"  deal get        Fetch one deal by ID",
 		"  deal create     Create one deal",
 		"  deal update     Update one deal",
+		"  note add        Add a linked note",
+		"  task create     Create a linked follow-up task",
+		"  meeting log     Log meeting notes and optional follow-ups",
+		"  call capture    Capture call notes and optional next steps",
+		"  prospect import Import prospect records from JSON/JSONL",
 		"  version         Print CLI version",
 	}
 

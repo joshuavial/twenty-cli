@@ -1,0 +1,11 @@
+{
+  "command": "note.add",
+  "data": {
+    "bodyV2": {
+      "markdown": "hello"
+    },
+    "id": "note_123",
+    "title": "Meeting note"
+  },
+  "ok": true
+}

@@ -1,0 +1,21 @@
+{
+  "command": "prospect.import",
+  "data": {
+    "created_companies": 1,
+    "created_people": 0,
+    "dry_run": true,
+    "failed": 0,
+    "processed": 1,
+    "results": [
+      {
+        "company": "Analytical Engines",
+        "email": "ada@example.com",
+        "person_id": "",
+        "status": "planned"
+      }
+    ],
+    "skipped_companies": 0,
+    "skipped_people": 0
+  },
+  "ok": true
+}

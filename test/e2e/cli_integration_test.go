@@ -146,17 +146,30 @@ func TestPeopleSearchMatchesSnapshot(t *testing.T) {
 			return
 		}
 
-		w.Header().Set("Content-Type", "application/json")
-		_, _ = w.Write([]byte(`{
+		body := `{
 			"data": {
 				"people": [
-					{"id":"person_123","name":{"firstName":"Ada","lastName":"Lovelace"},"emails":{"primaryEmail":"ada@example.com"}},
-					{"id":"person_456","name":{"firstName":"Grace","lastName":"Hopper"},"emails":{"primaryEmail":"grace@example.com"}}
+					{"id":"person_123","name":{"firstName":"Ada","lastName":"Lovelace"},"emails":{"primaryEmail":"ada@example.com"}}
 				]
 			},
-			"totalCount": 2,
+			"totalCount": 1,
 			"pageInfo": {"startCursor":"cursor_start","endCursor":"cursor_end","hasNextPage":false,"hasPreviousPage":false}
-		}`))
+		}`
+		if r.URL.Query().Get("filter") == "" {
+			body = `{
+				"data": {
+					"people": [
+						{"id":"person_123","name":{"firstName":"Ada","lastName":"Lovelace"},"emails":{"primaryEmail":"ada@example.com"}},
+						{"id":"person_456","name":{"firstName":"Grace","lastName":"Hopper"},"emails":{"primaryEmail":"grace@example.com"}}
+					]
+				},
+				"totalCount": 2,
+				"pageInfo": {"startCursor":"cursor_start","endCursor":"cursor_end","hasNextPage":false,"hasPreviousPage":false}
+			}`
+		}
+
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(body))
 	}))
 	defer server.Close()
 
@@ -263,4 +276,96 @@ func TestDealUpdateMatchesSnapshot(t *testing.T) {
 	}
 
 	harness.AssertJSONSnapshot("deal_update_success", result)
+}
+
+func TestNoteAddMatchesSnapshot(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch {
+		case r.URL.Path == "/rest/notes" && r.Method == http.MethodPost:
+			_, _ = w.Write([]byte(`{"data":{"createNote":{"id":"note_123","title":"Meeting note","bodyV2":{"markdown":"hello"}}}}`))
+		case r.URL.Path == "/rest/noteTargets" && r.Method == http.MethodPost:
+			_, _ = w.Write([]byte(`{"data":{"createNoteTarget":{"id":"note_target_123"}}}`))
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer server.Close()
+
+	harness := newHarness(t)
+	result := harness.Run(RunOptions{
+		Args: []string{"note", "add", "--title", "Meeting note", "--body", "hello", "--person-id", "person_123"},
+		Env: map[string]string{
+			"TWENTY_API_KEY":  "env-secret",
+			"TWENTY_BASE_URL": server.URL,
+		},
+	})
+
+	if result.ExitCode != 0 {
+		t.Fatalf("ExitCode = %d, want 0; stdout=%s stderr=%s", result.ExitCode, result.Stdout, result.Stderr)
+	}
+	harness.AssertJSONSnapshot("note_add_success", result)
+}
+
+func TestMeetingLogMatchesSnapshot(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch {
+		case r.URL.Path == "/rest/notes" && r.Method == http.MethodPost:
+			_, _ = w.Write([]byte(`{"data":{"createNote":{"id":"note_123","title":"Meeting","bodyV2":{"markdown":"met and aligned"}}}}`))
+		case r.URL.Path == "/rest/noteTargets" && r.Method == http.MethodPost:
+			_, _ = w.Write([]byte(`{"data":{"createNoteTarget":{"id":"note_target_123"}}}`))
+		case r.URL.Path == "/rest/tasks" && r.Method == http.MethodPost:
+			_, _ = w.Write([]byte(`{"data":{"createTask":{"id":"task_123","title":"Send proposal","status":"TODO"}}}`))
+		case r.URL.Path == "/rest/taskTargets" && r.Method == http.MethodPost:
+			_, _ = w.Write([]byte(`{"data":{"createTaskTarget":{"id":"task_target_123"}}}`))
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer server.Close()
+
+	harness := newHarness(t)
+	result := harness.Run(RunOptions{
+		Args: []string{"meeting", "log", "--body", "met and aligned", "--person-id", "person_123", "--create-followups", "--next-step", "Send proposal"},
+		Env: map[string]string{
+			"TWENTY_API_KEY":  "env-secret",
+			"TWENTY_BASE_URL": server.URL,
+		},
+	})
+
+	if result.ExitCode != 0 {
+		t.Fatalf("ExitCode = %d, want 0; stdout=%s stderr=%s", result.ExitCode, result.Stdout, result.Stderr)
+	}
+	harness.AssertJSONSnapshot("meeting_log_success", result)
+}
+
+func TestProspectImportDryRunMatchesSnapshot(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch r.URL.Path {
+		case "/rest/companies", "/rest/people":
+			_, _ = w.Write([]byte(`{"data":{"companies":[],"people":[]},"totalCount":0,"pageInfo":{"startCursor":"","endCursor":"","hasNextPage":false,"hasPreviousPage":false}}`))
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer server.Close()
+
+	harness := newHarness(t)
+	result := harness.Run(RunOptions{
+		Args: []string{"prospect", "import", "--file", "prospects.jsonl", "--lookup-first", "--dry-run"},
+		WorkingDirFiles: map[string]string{
+			"prospects.jsonl": "{\"first_name\":\"Ada\",\"last_name\":\"Lovelace\",\"email\":\"ada@example.com\",\"company\":\"Analytical Engines\",\"company_domain\":\"analytical.example\"}\n",
+		},
+		Env: map[string]string{
+			"TWENTY_API_KEY":  "env-secret",
+			"TWENTY_BASE_URL": server.URL,
+		},
+	})
+
+	if result.ExitCode != 0 {
+		t.Fatalf("ExitCode = %d, want 0; stdout=%s stderr=%s", result.ExitCode, result.Stdout, result.Stderr)
+	}
+	harness.AssertJSONSnapshot("prospect_import_dry_run", result)
 }
