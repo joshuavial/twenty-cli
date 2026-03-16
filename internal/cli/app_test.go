@@ -127,6 +127,121 @@ func TestParseFailureReturnsJSONWhenRequested(t *testing.T) {
 	}
 }
 
+func TestNoArgsPrintsTextHelpByDefault(t *testing.T) {
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+
+	app := New(strings.NewReader(""), &stdout, &stderr)
+
+	code := app.Run([]string{})
+	if code != int(output.ExitOK) {
+		t.Fatalf("Run() code = %d, want %d", code, output.ExitOK)
+	}
+	if !strings.Contains(stdout.String(), "Twenty CRM CLI") {
+		t.Fatalf("stdout = %q", stdout.String())
+	}
+	if strings.Contains(stdout.String(), "\"ok\"") {
+		t.Fatalf("stdout unexpectedly looks like json: %q", stdout.String())
+	}
+	if stderr.Len() != 0 {
+		t.Fatalf("stderr = %q, want empty", stderr.String())
+	}
+}
+
+func TestNoArgsWithExplicitJSONReturnsUsageEnvelope(t *testing.T) {
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+
+	app := New(strings.NewReader(""), &stdout, &stderr)
+
+	code := app.Run([]string{"--format", "json"})
+	if code != int(output.ExitUsage) {
+		t.Fatalf("Run() code = %d, want %d", code, output.ExitUsage)
+	}
+	envelope := decodeEnvelope(t, stdout.String())
+	if envelope.Error == nil || envelope.Error.Code != "cli.usage" {
+		t.Fatalf("stdout = %s", stdout.String())
+	}
+}
+
+func TestRootHelpPrintsText(t *testing.T) {
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+
+	app := New(strings.NewReader(""), &stdout, &stderr)
+
+	code := app.Run([]string{"--help"})
+	if code != int(output.ExitOK) {
+		t.Fatalf("Run() code = %d, want %d", code, output.ExitOK)
+	}
+	if !strings.Contains(stdout.String(), "Twenty CRM CLI") {
+		t.Fatalf("stdout = %q", stdout.String())
+	}
+}
+
+func TestEntityGroupHelpPrintsText(t *testing.T) {
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+
+	app := New(strings.NewReader(""), &stdout, &stderr)
+
+	code := app.Run([]string{"people", "--help"})
+	if code != int(output.ExitOK) {
+		t.Fatalf("Run() code = %d, want %d", code, output.ExitOK)
+	}
+	if !strings.Contains(stdout.String(), "People commands") {
+		t.Fatalf("stdout = %q", stdout.String())
+	}
+	if strings.Contains(stdout.String(), "\"ok\"") {
+		t.Fatalf("stdout unexpectedly looks like json: %q", stdout.String())
+	}
+}
+
+func TestEntitySubcommandHelpPrintsText(t *testing.T) {
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+
+	app := New(strings.NewReader(""), &stdout, &stderr)
+
+	code := app.Run([]string{"people", "search", "--help"})
+	if code != int(output.ExitOK) {
+		t.Fatalf("Run() code = %d, want %d", code, output.ExitOK)
+	}
+	if !strings.Contains(stdout.String(), "Search people") {
+		t.Fatalf("stdout = %q", stdout.String())
+	}
+}
+
+func TestWorkflowGroupHelpPrintsText(t *testing.T) {
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+
+	app := New(strings.NewReader(""), &stdout, &stderr)
+
+	code := app.Run([]string{"meeting", "--help"})
+	if code != int(output.ExitOK) {
+		t.Fatalf("Run() code = %d, want %d", code, output.ExitOK)
+	}
+	if !strings.Contains(stdout.String(), "Meeting commands") {
+		t.Fatalf("stdout = %q", stdout.String())
+	}
+}
+
+func TestWorkflowSubcommandHelpPrintsText(t *testing.T) {
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+
+	app := New(strings.NewReader(""), &stdout, &stderr)
+
+	code := app.Run([]string{"prospect", "import", "--help"})
+	if code != int(output.ExitOK) {
+		t.Fatalf("Run() code = %d, want %d", code, output.ExitOK)
+	}
+	if !strings.Contains(stdout.String(), "Import prospects from JSON or JSONL") {
+		t.Fatalf("stdout = %q", stdout.String())
+	}
+}
+
 func TestConfigFailureReturnsJSONWhenRequested(t *testing.T) {
 	var stdout bytes.Buffer
 	var stderr bytes.Buffer
@@ -268,9 +383,9 @@ func TestCompanySearchEmptyResultsReturnsArray(t *testing.T) {
 	}
 
 	var envelope struct {
-		OK      bool                     `json:"ok"`
-		Command string                   `json:"command"`
-		Data    []map[string]any         `json:"data"`
+		OK      bool             `json:"ok"`
+		Command string           `json:"command"`
+		Data    []map[string]any `json:"data"`
 	}
 	if err := json.Unmarshal(stdout.Bytes(), &envelope); err != nil {
 		t.Fatalf("json.Unmarshal() error = %v", err)
@@ -354,6 +469,45 @@ func TestAuthLoginPromptsOnTTY(t *testing.T) {
 	}
 	if !strings.Contains(stderr.String(), "API key: ") {
 		t.Fatalf("stderr = %q, want prompt", stderr.String())
+	}
+}
+
+func TestAuthLoginPromptsForBaseURLWhenFlagMissing(t *testing.T) {
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+
+	homeDir := t.TempDir()
+	t.Setenv("HOME", homeDir)
+
+	var captured config.Config
+	app := New(strings.NewReader("https://custom.example\n"), &stdout, &stderr)
+	app.isTTY = func(io.Reader) bool { return true }
+	app.clientFactory = func(cfg config.Config, _ client.HTTPDoer) twentyClient {
+		captured = cfg
+		return clientStub{
+			result: client.AuthCheckResult{
+				StatusCode: 200,
+				Endpoint:   "/metadata",
+			},
+		}
+	}
+
+	code := app.Run([]string{"auth", "login", "--api-key", "secret"})
+	if code != int(output.ExitOK) {
+		t.Fatalf("Run() code = %d, want %d; stdout=%s stderr=%s", code, output.ExitOK, stdout.String(), stderr.String())
+	}
+	if !strings.Contains(stderr.String(), "Base URL [https://api.twenty.com]: ") {
+		t.Fatalf("stderr = %q, want base URL prompt", stderr.String())
+	}
+	if captured.BaseURL != "https://custom.example" {
+		t.Fatalf("captured.BaseURL = %q, want https://custom.example", captured.BaseURL)
+	}
+	data, err := os.ReadFile(filepath.Join(homeDir, ".twenty", "settings"))
+	if err != nil {
+		t.Fatalf("ReadFile() error = %v", err)
+	}
+	if !strings.Contains(string(data), "\"base_url\": \"https://custom.example\"") {
+		t.Fatalf("settings = %q", string(data))
 	}
 }
 

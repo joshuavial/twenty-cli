@@ -2,6 +2,7 @@ package cli
 
 import (
 	"context"
+	"errors"
 	"flag"
 	"fmt"
 	"io"
@@ -89,13 +90,27 @@ func (a *App) runEntity(cfg config.Config, token string, args []string) int {
 		}, cfg.Format)
 	}
 
-	if len(args) == 0 {
-		return a.writeFailure(output.Failure{
-			Command: entity.singularCmd,
-			Kind:    output.ErrorKindUsage,
-			Code:    entity.singularCmd + ".usage",
-			Message: "expected subcommand",
-		}, cfg.Format)
+	if len(args) == 0 || isHelpArg(args) {
+		return a.writeHelpText(entityGroupHelp(entity))
+	}
+
+	switch args[0] {
+	case "search", "list":
+		if isHelpArg(args[1:]) {
+			return a.writeHelpText(entitySearchHelp(entity))
+		}
+	case "get":
+		if isHelpArg(args[1:]) {
+			return a.writeHelpText(entityGetHelp(entity))
+		}
+	case "create":
+		if isHelpArg(args[1:]) {
+			return a.writeHelpText(entityMutationHelp(entity, "create"))
+		}
+	case "update":
+		if isHelpArg(args[1:]) {
+			return a.writeHelpText(entityMutationHelp(entity, "update"))
+		}
 	}
 
 	cli := a.clientFactory(cfg, a.httpClient)
@@ -135,6 +150,9 @@ func (a *App) runEntitySearch(cli twentyClient, cfg config.Config, entity entity
 	fs.StringVar(&endingBefore, "ending-before", "", "Cursor for previous page")
 
 	if err := fs.Parse(args); err != nil {
+		if errors.Is(err, flag.ErrHelp) {
+			return a.writeHelpText(entitySearchHelp(entity))
+		}
 		return a.writeFailure(output.Failure{
 			Command: entity.pluralCmd + ".search",
 			Kind:    output.ErrorKindUsage,
@@ -199,6 +217,9 @@ func (a *App) runEntityGet(cli twentyClient, cfg config.Config, entity entityDef
 	fs.IntVar(&depth, "depth", 0, "Relation depth")
 
 	if err := fs.Parse(args); err != nil {
+		if errors.Is(err, flag.ErrHelp) {
+			return a.writeHelpText(entityGetHelp(entity))
+		}
 		return a.writeFailure(output.Failure{
 			Command: entity.singularCmd + ".get",
 			Kind:    output.ErrorKindUsage,
@@ -232,6 +253,9 @@ func (a *App) runEntityGet(cli twentyClient, cfg config.Config, entity entityDef
 func (a *App) runEntityCreate(cli twentyClient, cfg config.Config, entity entityDef, args []string) int {
 	payload, failure, ok := parseEntityMutation(entity, "create", args)
 	if !ok {
+		if failure.Code == "cli.help" {
+			return a.writeHelpText(entityMutationHelp(entity, "create"))
+		}
 		return a.writeFailure(failure, cfg.Format)
 	}
 
@@ -250,6 +274,9 @@ func (a *App) runEntityCreate(cli twentyClient, cfg config.Config, entity entity
 func (a *App) runEntityUpdate(cli twentyClient, cfg config.Config, entity entityDef, args []string) int {
 	payload, failure, ok := parseEntityMutation(entity, "update", args)
 	if !ok {
+		if failure.Code == "cli.help" {
+			return a.writeHelpText(entityMutationHelp(entity, "update"))
+		}
 		return a.writeFailure(failure, cfg.Format)
 	}
 
@@ -406,6 +433,14 @@ func parseEntityMutation(entity entityDef, action string, args []string) (map[st
 	fs.StringVar(&personID, "person-id", "", "Person ID")
 
 	if err := fs.Parse(args); err != nil {
+		if errors.Is(err, flag.ErrHelp) {
+			return nil, output.Failure{
+				Command: entity.singularCmd + "." + action,
+				Kind:    output.ErrorKindUsage,
+				Code:    "cli.help",
+				Message: "",
+			}, false
+		}
 		return nil, output.Failure{
 			Command: entity.singularCmd + "." + action,
 			Kind:    output.ErrorKindUsage,
@@ -513,4 +548,125 @@ func parseEntityMutation(entity entityDef, action string, args []string) (map[st
 	}
 
 	return payload, output.Failure{}, true
+}
+
+func entityGroupHelp(entity entityDef) []string {
+	return []string{
+		titleCase(entity.pluralCmd) + " commands",
+		"",
+		"Usage:",
+		fmt.Sprintf("  twenty %s <search|get|create|update>", entity.singularCmd),
+		fmt.Sprintf("  twenty %s search [flags]", entity.pluralCmd),
+		fmt.Sprintf("  twenty %s get --id <id>", entity.singularCmd),
+		fmt.Sprintf("  twenty %s create [flags]", entity.singularCmd),
+		fmt.Sprintf("  twenty %s update --id <id> [flags]", entity.singularCmd),
+		"",
+		"Examples:",
+		fmt.Sprintf("  twenty %s search --query ada", entity.pluralCmd),
+		fmt.Sprintf("  twenty %s get --id %s_123", entity.singularCmd, entity.domain),
+	}
+}
+
+func entitySearchHelp(entity entityDef) []string {
+	return []string{
+		fmt.Sprintf("Search %s", entity.pluralCmd),
+		"",
+		"Usage:",
+		fmt.Sprintf("  twenty %s search [--query TEXT] [--limit N] [--depth N]", entity.pluralCmd),
+		"",
+		"Flags:",
+		"  --query TEXT         Free-text search",
+		"  --limit N            Maximum records to return",
+		"  --depth N            Relation depth",
+		"  --starting-after ID  Cursor for next page",
+		"  --ending-before ID   Cursor for previous page",
+	}
+}
+
+func entityGetHelp(entity entityDef) []string {
+	return []string{
+		fmt.Sprintf("Fetch one %s", entity.singularCmd),
+		"",
+		"Usage:",
+		fmt.Sprintf("  twenty %s get --id <id> [--depth N]", entity.singularCmd),
+		"",
+		"Flags:",
+		"  --id ID      Record ID",
+		"  --depth N    Relation depth",
+	}
+}
+
+func entityMutationHelp(entity entityDef, action string) []string {
+	lines := []string{
+		fmt.Sprintf("%s one %s", titleCase(action), entity.singularCmd),
+		"",
+		"Usage:",
+		fmt.Sprintf("  twenty %s %s %s", entity.singularCmd, action, entityMutationUsage(entity, action)),
+		"",
+		"Common flags:",
+	}
+	lines = append(lines, entityMutationFlags(entity, action)...)
+	return lines
+}
+
+func titleCase(value string) string {
+	if value == "" {
+		return value
+	}
+	return strings.ToUpper(value[:1]) + value[1:]
+}
+
+func entityMutationUsage(entity entityDef, action string) string {
+	switch entity.domain {
+	case "person":
+		if action == "update" {
+			return "--id <id> [--first-name TEXT] [--last-name TEXT] [--email ADDR] [--job-title TEXT] [--city TEXT] [--company-id ID]"
+		}
+		return "--first-name TEXT [--last-name TEXT] [--email ADDR] [--job-title TEXT] [--city TEXT] [--company-id ID]"
+	case "company":
+		if action == "update" {
+			return "--id <id> [--name TEXT] [--domain URL] [--employees N] [--tagline TEXT]"
+		}
+		return "--name TEXT [--domain URL] [--employees N] [--tagline TEXT]"
+	case "deal":
+		if action == "update" {
+			return "--id <id> [--name TEXT] [--stage TEXT] [--company-id ID] [--person-id ID]"
+		}
+		return "--name TEXT [--stage TEXT] [--company-id ID] [--person-id ID]"
+	default:
+		return "[flags]"
+	}
+}
+
+func entityMutationFlags(entity entityDef, action string) []string {
+	var lines []string
+	if action == "update" {
+		lines = append(lines, "  --id ID            Record ID")
+	}
+	switch entity.domain {
+	case "person":
+		lines = append(lines,
+			"  --first-name TEXT  First name",
+			"  --last-name TEXT   Last name",
+			"  --email ADDR       Primary email",
+			"  --job-title TEXT   Job title",
+			"  --city TEXT        City",
+			"  --company-id ID    Linked company",
+		)
+	case "company":
+		lines = append(lines,
+			"  --name TEXT        Company name",
+			"  --domain URL       Primary domain",
+			"  --employees N      Employee count",
+			"  --tagline TEXT     Company tagline",
+		)
+	case "deal":
+		lines = append(lines,
+			"  --name TEXT        Deal name",
+			"  --stage TEXT       Deal stage",
+			"  --company-id ID    Linked company",
+			"  --person-id ID     Point of contact",
+		)
+	}
+	return lines
 }

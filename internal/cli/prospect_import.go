@@ -15,24 +15,24 @@ import (
 )
 
 type prospectRecord struct {
-	FirstName    string `json:"first_name"`
-	LastName     string `json:"last_name"`
-	Email        string `json:"email"`
-	Company      string `json:"company"`
+	FirstName     string `json:"first_name"`
+	LastName      string `json:"last_name"`
+	Email         string `json:"email"`
+	Company       string `json:"company"`
 	CompanyDomain string `json:"company_domain"`
-	JobTitle     string `json:"job_title"`
-	City         string `json:"city"`
+	JobTitle      string `json:"job_title"`
+	City          string `json:"city"`
 }
 
 type prospectImportSummary struct {
-	Processed        int                `json:"processed"`
-	CreatedPeople    int                `json:"created_people"`
-	CreatedCompanies int                `json:"created_companies"`
-	SkippedPeople    int                `json:"skipped_people"`
-	SkippedCompanies int                `json:"skipped_companies"`
-	Failed           int                `json:"failed"`
-	DryRun           bool               `json:"dry_run,omitempty"`
-	Results          []map[string]any   `json:"results,omitempty"`
+	Processed        int              `json:"processed"`
+	CreatedPeople    int              `json:"created_people"`
+	CreatedCompanies int              `json:"created_companies"`
+	SkippedPeople    int              `json:"skipped_people"`
+	SkippedCompanies int              `json:"skipped_companies"`
+	Failed           int              `json:"failed"`
+	DryRun           bool             `json:"dry_run,omitempty"`
+	Results          []map[string]any `json:"results,omitempty"`
 }
 
 type companyImportState struct {
@@ -52,6 +52,9 @@ func (a *App) runProspectImport(cfg config.Config, args []string) int {
 	fs.BoolVar(&dryRun, "dry-run", false, "Preview without creating")
 
 	if err := fs.Parse(args); err != nil {
+		if err == flag.ErrHelp {
+			return a.writeHelpText(prospectImportHelpLines())
+		}
 		return a.writeFailure(output.Failure{
 			Command: "prospect.import",
 			Kind:    output.ErrorKindUsage,

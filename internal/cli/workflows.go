@@ -20,6 +20,10 @@ type linkedTargetIDs struct {
 }
 
 func (a *App) runWorkflow(cfg config.Config, token string, args []string) int {
+	if len(args) == 0 || isHelpArg(args) {
+		return a.writeHelpText(workflowGroupHelp(token))
+	}
+
 	switch token {
 	case "note":
 		return a.runNote(cfg, args)
@@ -42,7 +46,10 @@ func (a *App) runWorkflow(cfg config.Config, token string, args []string) int {
 }
 
 func (a *App) runNote(cfg config.Config, args []string) int {
-	if len(args) == 0 || args[0] != "add" {
+	if len(args) == 0 || isHelpArg(args) {
+		return a.writeHelpText(noteHelpLines())
+	}
+	if args[0] != "add" {
 		return a.writeFailure(output.Failure{
 			Command: "note",
 			Kind:    output.ErrorKindUsage,
@@ -50,9 +57,15 @@ func (a *App) runNote(cfg config.Config, args []string) int {
 			Message: "expected subcommand: add",
 		}, cfg.Format)
 	}
+	if isHelpArg(args[1:]) {
+		return a.writeHelpText(noteAddHelpLines())
+	}
 
 	title, markdown, targets, failure, ok := parseNoteArgs("note.add", args[1:])
 	if !ok {
+		if failure.Code == "cli.help" {
+			return a.writeHelpText(noteAddHelpLines())
+		}
 		return a.writeFailure(failure, cfg.Format)
 	}
 
@@ -70,7 +83,10 @@ func (a *App) runNote(cfg config.Config, args []string) int {
 }
 
 func (a *App) runTask(cfg config.Config, args []string) int {
-	if len(args) == 0 || args[0] != "create" {
+	if len(args) == 0 || isHelpArg(args) {
+		return a.writeHelpText(taskHelpLines())
+	}
+	if args[0] != "create" {
 		return a.writeFailure(output.Failure{
 			Command: "task",
 			Kind:    output.ErrorKindUsage,
@@ -78,9 +94,15 @@ func (a *App) runTask(cfg config.Config, args []string) int {
 			Message: "expected subcommand: create",
 		}, cfg.Format)
 	}
+	if isHelpArg(args[1:]) {
+		return a.writeHelpText(taskCreateHelpLines())
+	}
 
 	taskSpec, failure, ok := parseTaskArgs("task.create", args[1:])
 	if !ok {
+		if failure.Code == "cli.help" {
+			return a.writeHelpText(taskCreateHelpLines())
+		}
 		return a.writeFailure(failure, cfg.Format)
 	}
 
@@ -98,7 +120,10 @@ func (a *App) runTask(cfg config.Config, args []string) int {
 }
 
 func (a *App) runMeeting(cfg config.Config, args []string) int {
-	if len(args) == 0 || args[0] != "log" {
+	if len(args) == 0 || isHelpArg(args) {
+		return a.writeHelpText(meetingHelpLines())
+	}
+	if args[0] != "log" {
 		return a.writeFailure(output.Failure{
 			Command: "meeting",
 			Kind:    output.ErrorKindUsage,
@@ -106,9 +131,15 @@ func (a *App) runMeeting(cfg config.Config, args []string) int {
 			Message: "expected subcommand: log",
 		}, cfg.Format)
 	}
+	if isHelpArg(args[1:]) {
+		return a.writeHelpText(meetingLogHelpLines())
+	}
 
 	spec, failure, ok := parseWorkflowLogArgs("meeting.log", "Meeting", args[1:])
 	if !ok {
+		if failure.Code == "cli.help" {
+			return a.writeHelpText(meetingLogHelpLines())
+		}
 		return a.writeFailure(failure, cfg.Format)
 	}
 
@@ -116,7 +147,10 @@ func (a *App) runMeeting(cfg config.Config, args []string) int {
 }
 
 func (a *App) runCall(cfg config.Config, args []string) int {
-	if len(args) == 0 || args[0] != "capture" {
+	if len(args) == 0 || isHelpArg(args) {
+		return a.writeHelpText(callHelpLines())
+	}
+	if args[0] != "capture" {
 		return a.writeFailure(output.Failure{
 			Command: "call",
 			Kind:    output.ErrorKindUsage,
@@ -124,9 +158,15 @@ func (a *App) runCall(cfg config.Config, args []string) int {
 			Message: "expected subcommand: capture",
 		}, cfg.Format)
 	}
+	if isHelpArg(args[1:]) {
+		return a.writeHelpText(callCaptureHelpLines())
+	}
 
 	spec, failure, ok := parseWorkflowLogArgs("call.capture", "Call", args[1:])
 	if !ok {
+		if failure.Code == "cli.help" {
+			return a.writeHelpText(callCaptureHelpLines())
+		}
 		return a.writeFailure(failure, cfg.Format)
 	}
 
@@ -134,12 +174,12 @@ func (a *App) runCall(cfg config.Config, args []string) int {
 }
 
 type activityWorkflowSpec struct {
-	title            string
-	markdown         string
-	targets          linkedTargetIDs
-	nextSteps        []string
-	createFollowups  bool
-	dealStage        string
+	title           string
+	markdown        string
+	targets         linkedTargetIDs
+	nextSteps       []string
+	createFollowups bool
+	dealStage       string
 }
 
 func (a *App) executeActivityWorkflow(cfg config.Config, command string, spec activityWorkflowSpec, dealStage string) int {
@@ -210,6 +250,9 @@ func parseNoteArgs(command string, args []string) (string, string, linkedTargetI
 	fs.StringVar(&targets.dealID, "deal-id", "", "Linked deal ID")
 
 	if err := fs.Parse(args); err != nil {
+		if err == flag.ErrHelp {
+			return "", "", linkedTargetIDs{}, output.Failure{Command: command, Kind: output.ErrorKindUsage, Code: "cli.help"}, false
+		}
 		return "", "", linkedTargetIDs{}, output.Failure{Command: command, Kind: output.ErrorKindUsage, Code: "cli.parse", Message: err.Error()}, false
 	}
 
@@ -251,6 +294,9 @@ func parseTaskArgs(command string, args []string) (taskSpec, output.Failure, boo
 	fs.StringVar(&spec.Targets.dealID, "deal-id", "", "Linked deal ID")
 
 	if err := fs.Parse(args); err != nil {
+		if err == flag.ErrHelp {
+			return taskSpec{}, output.Failure{Command: command, Kind: output.ErrorKindUsage, Code: "cli.help"}, false
+		}
 		return taskSpec{}, output.Failure{Command: command, Kind: output.ErrorKindUsage, Code: "cli.parse", Message: err.Error()}, false
 	}
 	if spec.Title == "" {
@@ -289,6 +335,9 @@ func parseWorkflowLogArgs(command, defaultTitle string, args []string) (activity
 	fs.Var(&nextSteps, "next-step", "Next step task title")
 
 	if err := fs.Parse(args); err != nil {
+		if err == flag.ErrHelp {
+			return activityWorkflowSpec{}, output.Failure{Command: command, Kind: output.ErrorKindUsage, Code: "cli.help"}, false
+		}
 		return activityWorkflowSpec{}, output.Failure{Command: command, Kind: output.ErrorKindUsage, Code: "cli.parse", Message: err.Error()}, false
 	}
 	body, err := readInlineOrFile(spec.markdown, bodyFile)
@@ -404,7 +453,10 @@ func (m *multiString) Set(value string) error {
 }
 
 func (a *App) runProspect(cfg config.Config, args []string) int {
-	if len(args) == 0 || args[0] != "import" {
+	if len(args) == 0 || isHelpArg(args) {
+		return a.writeHelpText(prospectHelpLines())
+	}
+	if args[0] != "import" {
 		return a.writeFailure(output.Failure{
 			Command: "prospect",
 			Kind:    output.ErrorKindUsage,
@@ -412,6 +464,155 @@ func (a *App) runProspect(cfg config.Config, args []string) int {
 			Message: "expected subcommand: import",
 		}, cfg.Format)
 	}
+	if isHelpArg(args[1:]) {
+		return a.writeHelpText(prospectImportHelpLines())
+	}
 
 	return a.runProspectImport(cfg, args[1:])
+}
+
+func workflowGroupHelp(token string) []string {
+	switch token {
+	case "note":
+		return noteHelpLines()
+	case "task":
+		return taskHelpLines()
+	case "meeting":
+		return meetingHelpLines()
+	case "call":
+		return callHelpLines()
+	case "prospect":
+		return prospectHelpLines()
+	default:
+		return []string{"Usage:", "  twenty <workflow> <command>"}
+	}
+}
+
+func noteHelpLines() []string {
+	return []string{
+		"Note commands",
+		"",
+		"Usage:",
+		"  twenty note add [flags]",
+		"",
+		"Examples:",
+		"  twenty note add --title \"Call recap\" --body \"Met with Ada\" --person-id person_123",
+	}
+}
+
+func noteAddHelpLines() []string {
+	return []string{
+		"Add a linked note",
+		"",
+		"Usage:",
+		"  twenty note add [--title TEXT] (--body TEXT | --body-file PATH) [--person-id ID] [--company-id ID] [--deal-id ID]",
+		"",
+		"Flags:",
+		"  --title TEXT       Note title",
+		"  --body TEXT        Inline markdown body",
+		"  --body-file PATH   Read markdown body from file",
+		"  --person-id ID     Link to a person",
+		"  --company-id ID    Link to a company",
+		"  --deal-id ID       Link to a deal",
+	}
+}
+
+func taskHelpLines() []string {
+	return []string{
+		"Task commands",
+		"",
+		"Usage:",
+		"  twenty task create [flags]",
+	}
+}
+
+func taskCreateHelpLines() []string {
+	return []string{
+		"Create a linked follow-up task",
+		"",
+		"Usage:",
+		"  twenty task create --title TEXT [--body TEXT|--body-file PATH] [--due-at RFC3339] [--status TEXT] [--person-id ID] [--company-id ID] [--deal-id ID]",
+		"",
+		"Flags:",
+		"  --title TEXT       Task title",
+		"  --body TEXT        Inline markdown body",
+		"  --body-file PATH   Read markdown body from file",
+		"  --due-at RFC3339   Due time",
+		"  --status TEXT      Task status",
+		"  --person-id ID     Link to a person",
+		"  --company-id ID    Link to a company",
+		"  --deal-id ID       Link to a deal",
+	}
+}
+
+func meetingHelpLines() []string {
+	return []string{
+		"Meeting commands",
+		"",
+		"Usage:",
+		"  twenty meeting log [flags]",
+	}
+}
+
+func meetingLogHelpLines() []string {
+	return workflowLogHelpLines("meeting log", "Meeting")
+}
+
+func callHelpLines() []string {
+	return []string{
+		"Call commands",
+		"",
+		"Usage:",
+		"  twenty call capture [flags]",
+	}
+}
+
+func callCaptureHelpLines() []string {
+	lines := workflowLogHelpLines("call capture", "Call")
+	lines = append(lines,
+		"  --deal-stage TEXT  Optional deal stage update",
+	)
+	return lines
+}
+
+func workflowLogHelpLines(command, defaultTitle string) []string {
+	return []string{
+		"Capture notes and optional follow-up tasks",
+		"",
+		"Usage:",
+		fmt.Sprintf("  twenty %s [--title TEXT] (--body TEXT | --body-file PATH) [--person-id ID] [--company-id ID] [--deal-id ID] [--create-followups --next-step TEXT]", command),
+		"",
+		"Flags:",
+		fmt.Sprintf("  --title TEXT           Activity title (default %q)", defaultTitle),
+		"  --body TEXT            Inline markdown body",
+		"  --body-file PATH       Read markdown body from file",
+		"  --person-id ID         Link to a person",
+		"  --company-id ID        Link to a company",
+		"  --deal-id ID           Link to a deal",
+		"  --create-followups     Create tasks from --next-step values",
+		"  --next-step TEXT       Follow-up task title (repeatable)",
+	}
+}
+
+func prospectHelpLines() []string {
+	return []string{
+		"Prospect commands",
+		"",
+		"Usage:",
+		"  twenty prospect import [flags]",
+	}
+}
+
+func prospectImportHelpLines() []string {
+	return []string{
+		"Import prospects from JSON or JSONL",
+		"",
+		"Usage:",
+		"  twenty prospect import --file PATH [--lookup-first] [--dry-run]",
+		"",
+		"Flags:",
+		"  --file PATH       Input file path, JSON array, JSONL, or - for stdin",
+		"  --lookup-first    Reuse matching existing people and companies",
+		"  --dry-run         Print the planned work without writing records",
+	}
 }

@@ -43,6 +43,9 @@ func New(stdin io.Reader, stdout, stderr io.Writer) *App {
 func (a *App) Run(args []string) int {
 	cfg, remaining, err := a.parseRoot(args)
 	if err != nil {
+		if errors.Is(err, flag.ErrHelp) {
+			return a.writeUsageText()
+		}
 		return a.writeFailure(output.Failure{
 			Command: "cli",
 			Kind:    output.ErrorKindUsage,
@@ -52,7 +55,10 @@ func (a *App) Run(args []string) int {
 	}
 
 	if len(remaining) == 0 {
-		return a.writeUsage(cfg.Format)
+		if explicitFormat(args) {
+			return a.writeUsage(cfg.Format)
+		}
+		return a.writeUsageText()
 	}
 
 	switch remaining[0] {
@@ -113,19 +119,20 @@ func (a *App) parseRoot(args []string) (config.Config, []string, error) {
 }
 
 func (a *App) runAuth(cfg config.Config, args []string) int {
-	if len(args) == 0 {
-		return a.writeFailure(output.Failure{
-			Command: "auth",
-			Kind:    output.ErrorKindUsage,
-			Code:    "auth.usage",
-			Message: "expected subcommand: check or login",
-		}, cfg.Format)
+	if len(args) == 0 || isHelpArg(args) {
+		return a.writeHelpText(authHelpLines())
 	}
 
 	switch args[0] {
 	case "check":
+		if isHelpArg(args[1:]) {
+			return a.writeHelpText(authCheckHelpLines())
+		}
 		return a.runAuthCheck(cfg)
 	case "login":
+		if isHelpArg(args[1:]) {
+			return a.writeHelpText(authLoginHelpLines())
+		}
 		return a.runAuthLogin(cfg, args[1:])
 	default:
 		return a.writeFailure(output.Failure{
@@ -212,6 +219,8 @@ func (a *App) runAuthLogin(cfg config.Config, args []string) int {
 			Message: err.Error(),
 		}, cfg.Format)
 	}
+	apiKeyProvided := flagProvided(fs, "api-key")
+	baseURLProvided := flagProvided(fs, "base-url")
 
 	apiKey = strings.TrimSpace(apiKey)
 	baseURL = strings.TrimSpace(baseURL)
@@ -226,7 +235,7 @@ func (a *App) runAuthLogin(cfg config.Config, args []string) int {
 	}
 
 	if a.isTTY(a.stdin) {
-		if apiKey == "" {
+		if !apiKeyProvided && apiKey == "" {
 			value, err := a.promptSecret("API key: ")
 			if err != nil {
 				return a.writeFailure(output.Failure{
@@ -239,7 +248,7 @@ func (a *App) runAuthLogin(cfg config.Config, args []string) int {
 			}
 			apiKey = value
 		}
-		if baseURL == "" {
+		if !baseURLProvided {
 			value, err := a.prompt("Base URL [" + cfg.BaseURL + "]: ")
 			if err != nil {
 				return a.writeFailure(output.Failure{
@@ -413,6 +422,47 @@ func (a *App) writeUsage(format string) int {
 	}, format)
 }
 
+func (a *App) writeUsageText() int {
+	lines := []string{
+		"Twenty CRM CLI",
+		"",
+		"Usage:",
+		"  twenty [--api-key KEY] [--base-url URL] [--format json|text] <command>",
+		"",
+		"Quick start:",
+		"  twenty auth login --api-key <key> --base-url https://api.twenty.com",
+		"  twenty auth check",
+		"",
+		"Common commands:",
+		"  auth login       Save credentials to settings",
+		"  auth check       Validate credentials and connectivity",
+		"  people search    Search people",
+		"  companies search Search companies",
+		"  deals search     Search deals",
+		"  meeting log      Log a meeting and follow-ups",
+		"  call capture     Capture call notes and next steps",
+		"  prospect import  Import prospects from JSON/JSONL",
+		"",
+		"More:",
+		"  twenty --format json auth check",
+		"  twenty version",
+	}
+
+	if err := output.WriteText(a.stdout, strings.Join(lines, "\n")); err != nil {
+		fmt.Fprintf(a.stderr, "write error: %v\n", err)
+		return int(output.ExitInternal)
+	}
+	return int(output.ExitOK)
+}
+
+func (a *App) writeHelpText(lines []string) int {
+	if err := output.WriteText(a.stdout, strings.Join(lines, "\n")); err != nil {
+		fmt.Fprintf(a.stderr, "write error: %v\n", err)
+		return int(output.ExitInternal)
+	}
+	return int(output.ExitOK)
+}
+
 func inferRequestedFormat(args []string) string {
 	for i := 0; i < len(args); i++ {
 		arg := args[i]
@@ -436,6 +486,90 @@ func inferRequestedFormat(args []string) string {
 	}
 
 	return "json"
+}
+
+func explicitFormat(args []string) bool {
+	for i := 0; i < len(args); i++ {
+		arg := args[i]
+		if arg == "--format" && i+1 < len(args) {
+			return true
+		}
+		if strings.HasPrefix(arg, "--format=") {
+			return true
+		}
+	}
+	return false
+}
+
+func flagProvided(fs *flag.FlagSet, name string) bool {
+	found := false
+	fs.Visit(func(current *flag.Flag) {
+		if current.Name == name {
+			found = true
+		}
+	})
+	return found
+}
+
+func isHelpArg(args []string) bool {
+	if len(args) == 0 {
+		return false
+	}
+	switch args[0] {
+	case "--help", "-h", "help":
+		return true
+	default:
+		return false
+	}
+}
+
+func authHelpLines() []string {
+	return []string{
+		"Auth commands",
+		"",
+		"Usage:",
+		"  twenty auth <command>",
+		"",
+		"Commands:",
+		"  check  Validate credentials and connectivity",
+		"  login  Save credentials to settings",
+		"",
+		"Examples:",
+		"  twenty auth check",
+		"  twenty auth login --api-key <key> --base-url https://api.twenty.com",
+	}
+}
+
+func authCheckHelpLines() []string {
+	return []string{
+		"Validate credentials and connectivity",
+		"",
+		"Usage:",
+		"  twenty auth check",
+		"",
+		"Notes:",
+		"  Reads credentials from flags, environment, project settings, or home settings.",
+		"  Use `twenty auth login` to write settings.",
+	}
+}
+
+func authLoginHelpLines() []string {
+	return []string{
+		"Save credentials to settings",
+		"",
+		"Usage:",
+		"  twenty auth login [--api-key KEY] [--base-url URL] [--scope home|project] [--overwrite]",
+		"",
+		"Flags:",
+		"  --api-key KEY     Twenty API key",
+		"  --base-url URL    Twenty base URL",
+		"  --scope SCOPE     Settings scope: home or project",
+		"  --overwrite       Replace an existing settings file",
+		"",
+		"Examples:",
+		"  twenty auth login --api-key <key> --base-url https://api.twenty.com",
+		"  twenty auth login --scope project --overwrite",
+	}
 }
 
 func defaultIsTTY(r io.Reader) bool {
